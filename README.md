@@ -1,0 +1,93 @@
+# Production Tracker
+
+A small web app for tracking a film production: daily call summaries and a shot list.
+
+- **Daily summaries**: a rich text editor for the notes from each daily call. You can paste screenshots straight in. A list on the left shows every day; click a day to open its summary. The editor saves automatically.
+- **Shot tracker**: a spreadsheet-style grid with shot name, description (with images), lens, comments and per-person to-dos. It also has Shotgrid-style extras: status pipeline, frame in/out with length and timecode, handles, sequence and scene, shot size, camera and movement, location, INT/EXT, day/night, shoot day, assignee, priority and due date.
+- **To-dos** for Mihai, Miguel, Rafael, Micael and Sascha. Add them per shot, or add general ones on the "To-dos by person" board. An admin can change the team.
+
+Try the interface without any setup: run it locally (see below) and open `/?demo`. Demo data stays in your own browser only.
+
+## Features
+
+| Area | What you get |
+| --- | --- |
+| Editor | Headings, font size, bold, italic, underline, strike, inline code, text color, highlight, bullet, numbered and check lists, alignment, quotes, dividers, tables, links, images (paste, drop or upload), undo and redo, clear formatting, print or save as PDF |
+| Grid | Click to select, type to edit, Enter/Tab/arrow keys, Delete clears, Ctrl+C copies, Ctrl+V pastes (including whole blocks copied from Excel or Google Sheets), Ctrl+D duplicates |
+| Rows | Add (auto-numbers `SQ010_0010`, then `_0020`), insert below, duplicate, delete, drag to reorder |
+| View | Sort by any column, filter by status and assignee, search, hide omitted, group by sequence, show or hide and resize columns, Status and Shot columns stay pinned while you scroll |
+| Totals | Shot count, total length in frames and timecode at the project frame rate, status breakdown |
+| Data | CSV export of the current view, CSV import that matches column headers |
+| Team | Live updates: changes from other people appear without a reload |
+
+## Security model
+
+- The code in this repository is public. The **data is not**: it lives in a private Supabase (Postgres) database.
+- Supabase Auth handles passwords. It stores bcrypt hashes only, never the passwords. The app requires at least 10 characters and rejects common passwords.
+- Anyone can register, but a new account sees **nothing**. An admin must approve it first, and the email address must be confirmed.
+- Row-level security on every table enforces this in the database itself, so the rule also holds for someone who calls the API directly. The `anon` role has no table access at all.
+- Images go to a private storage bucket. The app shows them through signed URLs that expire.
+- Stored rich text is sanitized with DOMPurify before display. A strict Content-Security-Policy blocks inline and third-party scripts.
+- `tests/schema.test.mjs` runs the real schema in an in-process Postgres and checks these rules as different users.
+
+The Supabase URL and the anon (publishable) key are built into the public site. That is how Supabase is designed to work: the key only identifies the project, and row-level security does the protection. **Never** put the `service_role` or secret key anywhere in this repository.
+
+## Setup (one time, about 15 minutes)
+
+### 1. Create the Supabase project
+
+1. Create a free account at [supabase.com](https://supabase.com) and create a new project. Pick a region close to the team and save the database password somewhere safe.
+2. Open **SQL Editor > New query**. Paste the full contents of [`supabase/schema.sql`](supabase/schema.sql).
+3. In the pasted SQL, replace `ADMIN_EMAIL_HERE` with the email address of the first admin. Then click **Run**.
+
+### 2. Configure authentication
+
+In **Authentication**:
+
+1. **Sign In / Providers > Email**: keep email signup enabled and **Confirm email** turned on. Set the minimum password length to 10. If your plan offers it, also turn on leaked password protection.
+2. **URL Configuration**: set **Site URL** to `https://aphexx100.github.io/production-tracker/`. Add the same address under **Redirect URLs**.
+
+### 3. Connect the GitHub site
+
+1. In Supabase, open **Project Settings > API** (or **API Keys**). Copy the **Project URL** and the **anon** or **publishable** key.
+2. In this GitHub repository, open **Settings > Secrets and variables > Actions > Variables**. Add these two repository variables:
+   - `SUPABASE_URL`: the project URL
+   - `SUPABASE_ANON_KEY`: the anon or publishable key
+3. Open **Actions**, select **Deploy to GitHub Pages**, and click **Run workflow**. Pushes to `main` also deploy.
+
+### 4. First sign-in
+
+1. Open the site and register with the admin email from step 1. Confirm the email.
+2. When other people register, the **Admin** button shows a red badge. Open it and approve only people you know.
+
+In the Admin window you can also set the project name and frame rate, and add or remove team members for the to-do lists.
+
+## Local development
+
+```bash
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173/?demo` for the demo. To work against the real project, copy `.env.example` to `.env.local` and fill in both values.
+
+```bash
+npm run check
+```
+
+`npm run check` builds the site and runs both test suites: the schema and security rules on PGlite, and an end-to-end browser test with Playwright. Run `npx playwright install chromium` once before the first run.
+
+## Project layout
+
+```
+supabase/schema.sql   tables, row-level security, storage bucket, realtime
+src/main.js           boot, sign-in gate, tabs
+src/auth.js           sign in, register, password reset, approval screen
+src/dailies.js        daily summaries: day list and editor
+src/editor.js         rich text editor (TipTap) and toolbar
+src/shots.js          shot tracker grid
+src/todos.js          to-do popover and per-person board
+src/admin.js          users, project settings, team
+src/api/supabase.js   data access (Supabase)
+src/api/demo.js       browser-only stand-in used by ?demo and the tests
+```

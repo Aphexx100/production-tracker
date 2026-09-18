@@ -1,0 +1,50 @@
+// Small stroke icons (24x24 grid) drawn for this app.
+const P = {
+  undo: 'M9 14L4 9l5-5M4 9h11a5 5 0 010 10h-3',
+  redo: 'M15 14l5-5-5-5M20 9H9a5 5 0 000 10h3',
+  bold: 'M7 5h6a3.5 3.5 0 010 7H7zM7 12h7a3.5 3.5 0 010 7H7z',
+  italic: 'M14 5h-4M14 19h-4M14 5l-4 14',
+  underline: 'M7 4v7a5 5 0 0010 0V4M5 20h14',
+  strike: 'M5 12h14M16 6.5A4 3 0 0012 5c-2.5 0-4 1.3-4 3M8 17.5A4 3 0 0012 19c2.5 0 4-1.3 4-3',
+  code: 'M9 8l-4 4 4 4M15 8l4 4-4 4',
+  bullet: 'M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01',
+  ordered: 'M10 6h10M10 12h10M10 18h10M4 5l1-1v4M4 14h2l-2 3h2',
+  task: 'M4 5h4v4H4zM4 14l2 2 3-3M12 7h8M12 15h8',
+  alignLeft: 'M4 6h16M4 10h10M4 14h16M4 18h10',
+  alignCenter: 'M4 6h16M7 10h10M4 14h16M7 18h10',
+  alignRight: 'M4 6h16M10 10h10M4 14h16M10 18h10',
+  alignJustify: 'M4 6h16M4 10h16M4 14h16M4 18h16',
+  link: 'M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1',
+  quote: 'M6 10h4v6H5v-4c0-3 1-5 4-6M15 10h4v6h-5v-4c0-3 1-5 4-6',
+  hr: 'M4 12h16',
+  table: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14',
+  image: 'M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15 9h.01',
+  clear: 'M6 5h12M12 5l-3 14M4 20L20 4',
+  color: 'M6 20L12 4l6 16M8.5 14h7',
+  highlight: 'M9 11l5-5 4 4-5 5zM9 11l-4 4v3h3l4-4M4 21h16',
+  plus: 'M12 5v14M5 12h14',
+  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+  copy: 'M8 8h11v11H8zM5 16V5h11',
+  search: 'M11 18a7 7 0 100-14 7 7 0 000 14zM20 20l-4-4',
+  columns: 'M4 5h16v14H4zM10 5v14M15 5v14',
+  download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+  upload: 'M12 16V5M7 10l5-5 5 5M5 20h14',
+  grip: 'M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01',
+  check: 'M5 12l5 5 9-10',
+  user: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 20c1-4 4-6 8-6s7 2 8 6',
+  settings: 'M12 15a3 3 0 100-6 3 3 0 000 6zM19 12l2-1-1-3-2 .3-1.5-1.5.3-2-3-1-1 2h-2l-1-2-3 1 .3 2L5.5 8.8 3.5 8.5l-1 3 2 1v2l-2 1 1 3 2-.3 1.5 1.5-.3 2 3 1 1-2h2l1 2 3-1-.3-2 1.5-1.5 2 .3 1-3-2-1z',
+  print: 'M7 9V4h10v5M7 17H4v-7h16v7h-3M7 14h10v6H7z',
+  list: 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01',
+  grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+  film: 'M4 4h16v16H4zM8 4v16M16 4v16M4 8h4M4 12h4M4 16h4M16 8h4M16 12h4M16 16h4',
+  note: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',
+  more: 'M5 12h.01M12 12h.01M19 12h.01',
+  x: 'M6 6l12 12M18 6L6 18',
+};
+
+export function icon(name, size = 18) {
+  const span = document.createElement('span');
+  span.className = 'ico';
+  span.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${P[name] || ''}"/></svg>`;
+  return span;
+}
