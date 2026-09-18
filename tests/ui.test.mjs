@@ -77,6 +77,12 @@ try {
   await page.waitForFunction(() => document.querySelector('tr.shot-row td[data-key="lens"]').textContent === '85mm Master Prime');
   ok('type-to-edit a cell, Enter saves');
 
+  assert.match(await page.getAttribute('th[data-key="scene"] .th-btn', 'title'), /^Scene: Scene number from the script/);
+  assert.match(await page.getAttribute('th[data-key="sequence"] .th-btn', 'title'), /group of scenes/);
+  const missing = await page.$$eval('th[data-key] .th-btn', (els) => els.filter((e) => /undefined/.test(e.title)).length);
+  assert.equal(missing, 0);
+  ok('column headers explain themselves on hover');
+
   await cell(0, 'frame_out').dblclick();
   await page.fill('.cell-input', '1048');
   await page.keyboard.press('Enter');

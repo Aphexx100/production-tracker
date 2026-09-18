@@ -23,31 +23,58 @@ const MOVES = ['Static', 'Pan', 'Tilt', 'Dolly', 'Track', 'Handheld', 'Steadicam
 
 const statusLabel = (id) => STATUSES.find((s) => s.id === id)?.label || id;
 
+// Header tooltips: what each column means in production terms.
+const T = {
+  status: "Where the shot is in the pipeline: Waiting (not ready), Ready (prepped to shoot), In progress, Shot (filmed), In review (with the director or VFX supervisor), Approved (final), On hold, Omitted (cut from the film).",
+  shot_name: "Unique shot code, usually sequence + shot number, e.g. SQ010_0020. Numbers go up in steps of 10 so new shots can be slotted in between (0015).",
+  sequence: "Sequence: a group of scenes that form one continuous story beat, e.g. SQ010 = “the harbour chase”. One sequence contains one or more scenes.",
+  scene: "Scene number from the script: the action in one location at one time. A scene is covered by one or more shots.",
+  description: "What happens in the shot: action, framing, dialogue cues. Paste storyboards or reference images here.",
+  shot_type: "Shot size, i.e. how much of the subject is in frame: EWS extreme wide, WS wide, MWS medium wide, MS medium, MCU medium close-up, CU close-up, ECU extreme close-up, OTS over-the-shoulder, POV point of view, Insert = detail of an object.",
+  lens: "Lens used or planned, e.g. “35mm Cooke S4”. Focal length sets the field of view: low mm = wide, high mm = tight.",
+  camera: "Camera body or unit, e.g. Alexa 35, A-cam / B-cam.",
+  movement: "How the camera moves: Static, Pan (turn left/right), Tilt (up/down), Dolly/Track (camera travels on rails), Handheld, Steadicam, Gimbal, Crane, Drone, Zoom, Push in / Pull out.",
+  frame_in: "First frame of the cut, e.g. 1001 (editorial convention: shots start at frame 1001 to leave room for handles).",
+  frame_out: "Last frame of the cut. Must be at or after the In frame.",
+  duration: "Cut length = Out − In + 1, shown in frames and as timecode (hh:mm:ss:ff) at the project frame rate. Hover a cell to see the length including handles.",
+  handles: "Extra frames kept before In and after Out, so editors and VFX have room to adjust the cut. Typically 8–12 frames per side.",
+  location: "Where the shot is filmed: set, stage or real place.",
+  int_ext: "INT = interior, EXT = exterior. Taken from the scene heading in the script.",
+  day_night: "Time of day in the story (DAY, NIGHT, DAWN, DUSK), from the scene heading. Drives lighting and scheduling.",
+  shoot_day: "The shooting-schedule date on which this shot is filmed.",
+  assignee: "Main person responsible for the shot.",
+  priority: "How urgent the shot is: low, normal, high, urgent.",
+  due_date: "Deadline for the shot. Shown in red when overdue and not yet approved or omitted.",
+  comments: "Free notes: continuity, problems, director’s feedback. Shift+Enter for a new line.",
+  _todo: "Open tasks for this shot per team member. The number is how many are still open; ✓ means all done. Click to add or tick off tasks.",
+  updated_at: "When the shot was last changed, and by whom."
+};
+
 // type: text | int | select | date | rich | long | calc | todo | meta
 const COLUMNS = [
-  { key: 'status', label: 'Status', type: 'select', w: 116, options: () => STATUSES.map((s) => [s.id, s.label]) },
-  { key: 'shot_name', label: 'Shot', type: 'text', w: 130 },
-  { key: 'sequence', label: 'Seq', type: 'text', w: 76 },
-  { key: 'scene', label: 'Scene', type: 'text', w: 62 },
-  { key: 'description', label: 'Description', type: 'rich', w: 320 },
-  { key: 'shot_type', label: 'Size', type: 'text', w: 70, suggest: SHOT_TYPES },
-  { key: 'lens', label: 'Lens', type: 'text', w: 120 },
-  { key: 'camera', label: 'Camera', type: 'text', w: 100, hidden: true },
-  { key: 'movement', label: 'Movement', type: 'text', w: 100, suggest: MOVES },
-  { key: 'frame_in', label: 'In', type: 'int', w: 66 },
-  { key: 'frame_out', label: 'Out', type: 'int', w: 66 },
-  { key: 'duration', label: 'Length', type: 'calc', w: 118 },
-  { key: 'handles', label: 'Handles', type: 'int', w: 70, hidden: true },
-  { key: 'location', label: 'Location', type: 'text', w: 110, hidden: true },
-  { key: 'int_ext', label: 'I/E', type: 'select', w: 72, hidden: true, options: () => ['', 'INT', 'EXT', 'INT/EXT'].map((v) => [v, v || '—']) },
-  { key: 'day_night', label: 'D/N', type: 'select', w: 76, hidden: true, options: () => ['', 'DAY', 'NIGHT', 'DAWN', 'DUSK'].map((v) => [v, v || '—']) },
-  { key: 'shoot_day', label: 'Shoot day', type: 'date', w: 116, hidden: true },
-  { key: 'assignee', label: 'Assigned', type: 'select', w: 96, options: () => [['', '—'], ...state.team.map((m) => [m.name, m.name])] },
-  { key: 'priority', label: 'Priority', type: 'select', w: 84, options: () => PRIORITIES.map((p) => [p, p]) },
-  { key: 'due_date', label: 'Due', type: 'date', w: 110, hidden: true },
-  { key: 'comments', label: 'Comments', type: 'long', w: 220 },
-  { key: '_todo', label: 'To-do', type: 'todo', w: 200 },
-  { key: 'updated_at', label: 'Updated', type: 'meta', w: 130, hidden: true },
+  { key: 'status', tip: T.status, label: 'Status', type: 'select', w: 116, options: () => STATUSES.map((s) => [s.id, s.label]) },
+  { key: 'shot_name', tip: T.shot_name, label: 'Shot', type: 'text', w: 130 },
+  { key: 'sequence', tip: T.sequence, label: 'Seq', type: 'text', w: 76 },
+  { key: 'scene', tip: T.scene, label: 'Scene', type: 'text', w: 62 },
+  { key: 'description', tip: T.description, label: 'Description', type: 'rich', w: 320 },
+  { key: 'shot_type', tip: T.shot_type, label: 'Size', type: 'text', w: 70, suggest: SHOT_TYPES },
+  { key: 'lens', tip: T.lens, label: 'Lens', type: 'text', w: 120 },
+  { key: 'camera', tip: T.camera, label: 'Camera', type: 'text', w: 100, hidden: true },
+  { key: 'movement', tip: T.movement, label: 'Movement', type: 'text', w: 100, suggest: MOVES },
+  { key: 'frame_in', tip: T.frame_in, label: 'In', type: 'int', w: 66 },
+  { key: 'frame_out', tip: T.frame_out, label: 'Out', type: 'int', w: 66 },
+  { key: 'duration', tip: T.duration, label: 'Length', type: 'calc', w: 118 },
+  { key: 'handles', tip: T.handles, label: 'Handles', type: 'int', w: 70, hidden: true },
+  { key: 'location', tip: T.location, label: 'Location', type: 'text', w: 110, hidden: true },
+  { key: 'int_ext', tip: T.int_ext, label: 'I/E', type: 'select', w: 72, hidden: true, options: () => ['', 'INT', 'EXT', 'INT/EXT'].map((v) => [v, v || '—']) },
+  { key: 'day_night', tip: T.day_night, label: 'D/N', type: 'select', w: 76, hidden: true, options: () => ['', 'DAY', 'NIGHT', 'DAWN', 'DUSK'].map((v) => [v, v || '—']) },
+  { key: 'shoot_day', tip: T.shoot_day, label: 'Shoot day', type: 'date', w: 116, hidden: true },
+  { key: 'assignee', tip: T.assignee, label: 'Assigned', type: 'select', w: 96, options: () => [['', '—'], ...state.team.map((m) => [m.name, m.name])] },
+  { key: 'priority', tip: T.priority, label: 'Priority', type: 'select', w: 84, options: () => PRIORITIES.map((p) => [p, p]) },
+  { key: 'due_date', tip: T.due_date, label: 'Due', type: 'date', w: 110, hidden: true },
+  { key: 'comments', tip: T.comments, label: 'Comments', type: 'long', w: 220 },
+  { key: '_todo', tip: T._todo, label: 'To-do', type: 'todo', w: 200 },
+  { key: 'updated_at', tip: T.updated_at, label: 'Updated', type: 'meta', w: 130, hidden: true },
 ];
 const EDITABLE = new Set(['text', 'int', 'select', 'date', 'rich', 'long']);
 const PREFS = 'pt-grid-prefs-v1';
@@ -196,7 +223,8 @@ export function mountShots(root) {
     for (const c of cols()) {
       const sorted = sort?.key === c.key ? sort.dir : null;
       const th = h(`th${sorted ? '.sorted' : ''}`, { scope: 'col', dataset: { key: c.key }, 'aria-sort': sorted ? (sorted === 'asc' ? 'ascending' : 'descending') : null });
-      const label = h('button.th-btn', { type: 'button', title: c.type === 'todo' || c.type === 'calc' && c.key !== 'duration' ? c.label : `Sort by ${c.label}` },
+      const hint = c.type === 'todo' ? '' : '\n\nClick to sort.';
+      const label = h('button.th-btn', { type: 'button', title: `${c.label}: ${c.tip}${hint}` },
         c.label, sorted ? h('span.sort-ind', sorted === 'asc' ? '▲' : '▼') : null);
       if (c.type !== 'todo') label.addEventListener('click', () => cycleSort(c.key));
       const grip = h('span.col-resize', { 'aria-hidden': 'true' });
@@ -801,7 +829,7 @@ export function mountShots(root) {
 
   function openColumns() {
     import('./util.js').then(({ modal }) => {
-      const list = h('div.col-list', COLUMNS.map((c) => h('label.check',
+      const list = h('div.col-list', COLUMNS.map((c) => h('label.check', { title: c.tip },
         h('input', { type: 'checkbox', checked: !hidden.has(c.key), on: { change: (e) => {
           if (e.target.checked) hidden.delete(c.key); else hidden.add(c.key);
           savePrefs(); renderAll();
