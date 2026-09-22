@@ -37,12 +37,14 @@ const refsSql = readFileSync(new URL('../supabase/002_references.sql', import.me
 const limitSql = readFileSync(new URL('../supabase/003_upload_limit.sql', import.meta.url), 'utf8');
 const timelineSql = readFileSync(new URL('../supabase/004_timeline.sql', import.meta.url), 'utf8');
 const tasksSql = readFileSync(new URL('../supabase/005_tasks.sql', import.meta.url), 'utf8');
+const prioSql = readFileSync(new URL('../supabase/006_task_priority.sql', import.meta.url), 'utf8');
 for (let i = 0; i < 2; i++) { // twice: every file must be safe to re-run
   await db.exec(sql);
   await db.exec(refsSql);
   await db.exec(limitSql);
   await db.exec(timelineSql);
   await db.exec(tasksSql);
+  await db.exec(prioSql);
 }
 
 const ADMIN = '00000000-0000-0000-0000-00000000000a';
@@ -202,5 +204,9 @@ assert.deepEqual(r.rows[0], { milestone_id: null, milestone_title: 'Picture lock
 await as(MEMBER, `delete from public.dailies where id = '${dId}'`);
 r = await db.query(`select daily_id from public.todos where body = 'Deliver cut'`); assert.equal(r.rows[0].daily_id, null);
 ok('tasks: due date, milestone link and source call; deleting either keeps the task');
+r = await db.query(`select priority from public.todos where body = 'Deliver cut'`); assert.equal(r.rows[0].priority, 'normal');
+await as(MEMBER, `update public.todos set priority = 'urgent' where body = 'Deliver cut'`);
+await fails(MEMBER, `update public.todos set priority = 'asap' where body = 'Deliver cut'`);
+ok('tasks: priority defaults to normal, only low/normal/high/urgent');
 
 console.log(`schema: ${passed} checks passed`);

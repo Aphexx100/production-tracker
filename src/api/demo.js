@@ -139,7 +139,7 @@ export function createDemoApi() {
   function defaults(name) {
     if (name === 'shots') return { sort_order: 0, status: 'wtg', priority: 'normal', sequence: '', scene: '', shot_name: '', description: '', shot_type: '', lens: '', camera: '', movement: '', frame_in: null, frame_out: null, handles: 0, location: '', int_ext: '', day_night: '', shoot_day: null, assignee: null, due_date: null, comments: '', start_date: null, end_date: null };
     if (name === 'dailies') return { title: '', content: '' };
-    if (name === 'todos') return { done: false, shot_id: null, due_date: null, milestone_id: null, milestone_title: null, daily_id: null, source_quote: null };
+    if (name === 'todos') return { done: false, priority: 'normal', shot_id: null, due_date: null, milestone_id: null, milestone_title: null, daily_id: null, source_quote: null };
     if (name === 'milestones') return { kind: 'milestone', sequence: '', shot_id: null, notes: '', done: false };
     if (name === 'refs') return { sequence: '', title: '', notes: '', url: null, storage_path: null, thumb_path: null, file_name: null, mime: null, size_bytes: null };
     return {};

@@ -462,12 +462,12 @@ try {
   await page.waitForSelector('#pane-tasks:not([hidden]) .task');
   const col = (name) => page.locator(`.tasks-board .board-col[data-person="${name}"]`);
   const mihaiTask = col('Mihai').locator('.task', { hasText: 'fog machine' });
-  assert.match(await mihaiTask.textContent(), /2 Oct/);
-  assert.equal(await mihaiTask.locator('.tchip.ms.deadline').textContent(), '⚑ SQ010 VFX turnover');
+  assert.equal(await mihaiTask.locator('input.fld.due').inputValue(), '2026-10-02');
+  assert.equal(await mihaiTask.locator('select.fld.ms').evaluate((el) => el.selectedOptions[0].textContent), '⚑ SQ010 VFX turnover');
   assert.equal(await mihaiTask.locator('.tchip.src').count(), 1);
   const rafTask = col('Rafael').locator('.task', { hasText: 'Roto Mara' });
-  assert.equal(await rafTask.locator('.tchip.ms.pending').textContent(), '◇ Final grade');
-  assert.equal(await rafTask.locator('.tchip.shot').textContent(), 'SQ010_0020');
+  assert.equal(await rafTask.locator('select.fld.ms').evaluate((el) => el.selectedOptions[0].textContent), '◇ Final grade');
+  assert.equal(await rafTask.locator('select.fld.shot').evaluate((el) => el.selectedOptions[0].textContent), 'SQ010_0020');
   ok('tasks land in the per-person lists, linked to the existing milestone, the shot and the call');
 
   // running it again on the same call flags duplicates
@@ -501,7 +501,7 @@ try {
   assert.equal(vfx.date, '2026-10-02', 'override takes the task due date');
   assert.deepEqual([grade.date, grade.kind, grade.shot_id], ['2026-10-20', 'deadline', rotoShot.id]);
   assert.equal(db.todos.find((t) => t.body === 'Roto Mara on SQ010_0020').milestone_id, grade.id);
-  assert.equal(await rafTask.locator('.tchip.ms.deadline').textContent(), '⚑ Final grade');
+  assert.equal(await rafTask.locator('select.fld.ms').evaluate((el) => el.selectedOptions[0].textContent), '⚑ Final grade');
   ok('“Convert to milestones” asks about existing ones, overrides or creates, and links the tasks');
 
   await page.click('button:has-text("Convert to milestones")');
@@ -534,6 +534,65 @@ try {
   await sendTask.locator('input[type=checkbox]').click();
   await page.waitForFunction(() => !document.querySelector('.tasks-board .board-col[data-person="Sascha"]').textContent.includes('Send call sheet'));
   ok('add a task by hand and complete it');
+
+  // inline editing, priority and sorting
+  const mihai = col('Mihai');
+  const titles = async (c) => c.locator('.task textarea.task-text').evaluateAll((els) => els.map((e) => e.value));
+  const sky = mihai.locator('.task', { hasText: 'Sky replacement comp' });
+  assert.deepEqual(await titles(mihai), ['Mihai books the fog machine by 2026-10-02 for the SQ010 VFX turnover.', 'Sky replacement comp']);
+  await sky.locator('select.fld.prio').selectOption('urgent');
+  await page.waitForFunction(() => document.querySelector('.tasks-board .board-col[data-person="Mihai"] .task').classList.contains('p-urgent'));
+  assert.deepEqual((await titles(mihai))[0], 'Sky replacement comp');
+  await page.selectOption('.tasks-toolbar select[aria-label="Sort tasks"]', 'due');
+  assert.deepEqual((await titles(mihai))[0], 'Mihai books the fog machine by 2026-10-02 for the SQ010 VFX turnover.');
+  await page.selectOption('.tasks-toolbar select[aria-label="Sort tasks"]', 'priority');
+  assert.match(await page.textContent('.tasks-summary'), /1 urgent/);
+  let dbT = await page.evaluate(() => JSON.parse(localStorage.getItem('pt-demo-db-v1')));
+  assert.equal(dbT.todos.find((t) => t.body === 'Sky replacement comp').priority, 'urgent');
+  ok('priority is set on the card, shown as colour, and drives the sort order');
+
+  const skyCard = mihai.locator('.task', { hasText: 'Sky replacement comp' });
+  await skyCard.locator('input.fld.due').fill('2026-10-09');
+  await skyCard.locator('textarea.task-text').click();
+  await skyCard.locator('textarea.task-text').fill('Sky replacement comp v2');
+  await skyCard.locator('textarea.task-text').press('Enter');
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('pt-demo-db-v1')).todos.some((t) => t.body === 'Sky replacement comp v2' && t.due_date === '2026-10-09'));
+  const v2 = mihai.locator('.task', { hasText: 'Sky replacement comp v2' });
+  await v2.locator('select.fld.person').selectOption('Micael');
+  await col('Micael').locator('.task', { hasText: 'Sky replacement comp v2' }).waitFor();
+  assert.equal(await mihai.locator('.task', { hasText: 'Sky replacement comp v2' }).count(), 0);
+  const moved = col('Micael').locator('.task', { hasText: 'Sky replacement comp v2' });
+  await moved.locator('select.fld.shot').selectOption({ label: 'SQ020_0010' });
+  await moved.locator('select.fld.ms').selectOption('__new');
+  await page.fill('.modal input', 'Sky pass approval');
+  await page.click('.modal button:has-text("OK")');
+  await page.waitForFunction(() => {
+    const t = JSON.parse(localStorage.getItem('pt-demo-db-v1')).todos.find((x) => x.body === 'Sky replacement comp v2');
+    return t.person === 'Micael' && t.milestone_title === 'Sky pass approval' && !t.milestone_id;
+  });
+  assert.equal(await col('Micael').locator('.task', { hasText: 'Sky replacement comp v2' }).locator('select.fld.ms').evaluate((el) => el.selectedOptions[0].textContent), '◇ Sky pass approval');
+  ok('text, due date, person, shot and milestone are edited directly on the card');
+
+  // long content never spills out of its column (last column included)
+  const sascha = col('Sascha');
+  await sascha.locator('.todo-add').fill('Coordinate_the_underwater_plate_shoot_with_the_marine_unit_and_the_harbour_master_before_Friday_morning');
+  await sascha.locator('.todo-add').press('Enter');
+  const longCard = sascha.locator('.task', { hasText: 'Coordinate_the_underwater' });
+  await longCard.locator('select.fld.ms').selectOption('__new');
+  await page.fill('.modal input', 'Second unit underwater photography wrap and plate turnover');
+  await page.click('.modal button:has-text("OK")');
+  await longCard.locator('select.fld.ms.pending').waitFor();
+  for (const width of [1440, 1100, 820]) {
+    await page.setViewportSize({ width, height: 900 });
+    const spill = await page.evaluate(() => [...document.querySelectorAll('.tasks-board .board-col')].flatMap((c) => {
+      const r = c.getBoundingClientRect();
+      return [...c.querySelectorAll('*')].filter((e) => { const b = e.getBoundingClientRect(); return b.width && (b.right > r.right + 0.5 || b.left < r.left - 0.5); })
+        .map((e) => `${c.dataset.person}: ${e.tagName}.${e.className}`);
+    }));
+    assert.deepEqual(spill, [], `width ${width}`);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  ok('long task text and names stay inside their column at every width');
 
   // security: stored markup must not run script
   await page.evaluate(() => {
