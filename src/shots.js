@@ -1,4 +1,4 @@
-import { h, $, $$, toast, errMsg, framesToTC, htmlToText, lsGet, lsSet, fmtDay, fmtTime, confirmDialog, csvEscape, download, todayISO } from './util.js';
+import { h, $, $$, toast, errMsg, framesToTC, htmlToText, lsGet, lsSet, fmtDay, fmtTime, confirmDialog, csvEscape, download, todayISO, modal } from './util.js';
 import { icon } from './icons.js';
 import { api, state, on, emit, profileName } from './state.js';
 import { sanitize } from './sanitize.js';
@@ -279,8 +279,10 @@ export function mountShots(root) {
         group = s.sequence || '';
         const members = list.filter((x) => (x.sequence || '') === group);
         const frames = members.reduce((a, x) => a + (x.duration || 0), 0);
+        const code = group;
         frag.append(h('tr.group-row', h('td', { colSpan: ncols },
-          h('strong', group || 'No sequence'), h('span.faint', ` · ${members.length} shot${members.length === 1 ? '' : 's'} · ${frames} f · ${framesToTC(frames, state.settings.fps)}`))));
+          h('strong', group || 'No sequence'), h('span.faint', ` · ${members.length} shot${members.length === 1 ? '' : 's'} · ${frames} f · ${framesToTC(frames, state.settings.fps)}`),
+          code ? h('button.link-mini.group-edit', { type: 'button', title: `Rename or delete ${code}`, on: { click: () => openSequences(code) } }, 'Edit sequence') : null)));
       }
       frag.append(renderRow(s, i + 1));
     });
@@ -839,6 +841,7 @@ export function mountShots(root) {
 
   function openMoreMenu(anchor) {
     menu(anchor, [
+      { label: 'Manage sequences…', icon: 'folder', run: () => openSequences() },
       { label: 'Show / hide columns…', icon: 'columns', run: openColumns },
       { label: 'Export CSV (current view)', icon: 'download', run: exportCsv },
       { label: 'Import CSV…', icon: 'upload', run: importCsv },
@@ -969,6 +972,114 @@ export function mountShots(root) {
     seqMeta = type === 'DELETE' ? seqMeta.filter((q) => q.code !== old.code) : [...seqMeta.filter((q) => q.code !== row.code), row];
     refreshSequences();
   });
+
+
+  // ---------- manage sequences (rename / delete) ----------
+  function applyRename(oldCode, newCode) {
+    for (const x of shots) if ((x.sequence || '') === oldCode) { x.sequence = newCode; textCache.delete(x); }
+    for (const r of refRows) if (r.sequence === oldCode) r.sequence = newCode;
+    if (seqMeta.some((q) => q.code === newCode)) seqMeta = seqMeta.filter((q) => q.code !== oldCode);
+    else seqMeta.forEach((q) => { if (q.code === oldCode) q.code = newCode; });
+    if (filter.sequence === oldCode) filter.sequence = newCode;
+    countRefs(refRows);
+    refreshSequences();
+  }
+
+  function openSequences(focusCode) {
+    const body = h('div.seq-admin');
+    const dlg = modal('Sequences', [
+      h('p.faint', 'Renaming updates every shot, reference and milestone of the sequence. Deleting never deletes shots: they move to another sequence or to “No sequence”.'),
+      body,
+      h('div.row.end', h('button.btn', { type: 'button', on: { click: async () => {
+        const name = await askSequenceName();
+        if (!name) return;
+        const row = await saveSequence(name, seqMeta);
+        if (row && !seqMeta.some((q) => q.code === row.code)) seqMeta.push(row);
+        refreshSequences(); draw();
+      } } }, icon('plus', 14), 'New sequence')),
+    ], { wide: true });
+
+    function draw() {
+      refreshSequences();
+      const rows = knownSequences.map(({ code, title }) => {
+        const nShots = shots.filter((x) => x.sequence === code).length;
+        const nRefs = refRows.filter((r) => r.sequence === code).length;
+        const name = h('input.seq-name-input', { value: code, maxLength: 40, 'aria-label': `Name of ${code}` });
+        const ttl = h('input', { value: title, maxLength: 200, placeholder: 'Title (optional)', 'aria-label': `Title of ${code}` });
+        // preventDefault: the same Enter must not also press the confirm dialog's focused button
+        name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); name.blur(); } if (e.key === 'Escape') { name.value = code; name.blur(); } });
+        name.addEventListener('change', () => rename(code, name.value));
+        ttl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); ttl.blur(); } });
+        ttl.addEventListener('change', async () => {
+          try {
+            const row = await api().sequences.upsert({ code, title: ttl.value.trim(), ...(seqMeta.some((q) => q.code === code) ? {} : { sort_order: Math.max(0, ...seqMeta.map((q) => q.sort_order || 0)) + 1 }) });
+            seqMeta = [...seqMeta.filter((q) => q.code !== code), row];
+            refreshSequences(); toast('Title saved');
+          } catch (e) { toast(`Not saved: ${friendlySeq(e)}`, 'error', 8000); }
+        });
+        const del = h('button.btn.small.danger', { type: 'button', on: { click: () => remove(code, nShots, nRefs) } }, icon('trash', 13), 'Delete');
+        return h(`tr${code === focusCode ? '.focus' : ''}`, { dataset: { seq: code } },
+          h('td', name), h('td', ttl), h('td.num', String(nShots)), h('td.num', String(nRefs)), h('td', del));
+      });
+      body.replaceChildren(rows.length
+        ? h('table.simple.seq-table', h('thead', h('tr', ['Name', 'Title', 'Shots', 'References', ''].map((x) => h('th', x)))), h('tbody', rows))
+        : h('p.empty-small', 'No sequences yet.'));
+      body.querySelector('tr.focus input')?.focus();
+    }
+
+    async function rename(oldCode, raw) {
+      const newCode = String(raw || '').trim();
+      if (!newCode || newCode === oldCode) { draw(); return; }
+      const merge = knownSequences.some((q) => q.code === newCode);
+      if (merge && !(await confirmDialog(`“${newCode}” already exists. Merge “${oldCode}” into it? All its shots, references and milestones move to “${newCode}”.`, 'Merge'))) { draw(); return; }
+      try {
+        await api().sequences.rename(oldCode, newCode);
+        applyRename(oldCode, newCode);
+        emit('sequences-changed');
+        renderChrome(); renderBody(); draw();
+        toast(merge ? `Merged “${oldCode}” into “${newCode}”` : `Renamed “${oldCode}” to “${newCode}”`);
+      } catch (e) { toast(`Not renamed: ${friendlySeq(e)}`, 'error', 8000); draw(); }
+    }
+
+    async function remove(code, nShots, nRefs) {
+      const target = h('select', { 'aria-label': 'Move its shots to' }, h('option', { value: '' }, 'No sequence'),
+        knownSequences.filter((q) => q.code !== code).map((q) => h('option', { value: q.code }, q.code)));
+      const ok = await new Promise((resolve) => {
+        let done = false;
+        const finish = (v) => { if (!done) { done = true; m.close(); resolve(v); } };
+        const m = modal(`Delete sequence ${code}?`, [
+          h('p', `${nShots} shot${nShots === 1 ? '' : 's'}, ${nRefs} reference${nRefs === 1 ? '' : 's'} and any milestones of ${code} are kept and moved to:`),
+          target,
+          h('div.row.end',
+            h('button.btn', { type: 'button', on: { click: () => finish(false) } }, 'Cancel'),
+            h('button.btn.danger', { type: 'button', on: { click: () => finish(true) } }, 'Delete sequence')),
+        ], { onClose: () => { if (!done) { done = true; resolve(false); } } });
+      });
+      if (!ok) return;
+      const moveTo = target.value;
+      try {
+        await api().sequences.deleteAndMove(code, moveTo);
+        applyRename(code, moveTo);
+        seqMeta = seqMeta.filter((q) => q.code !== code);
+        if (filter.sequence === code) filter.sequence = null;
+        refreshSequences();
+        emit('sequences-changed');
+        renderChrome(); renderBody(); draw();
+        toast(`Deleted ${code}${nShots ? `; its shots are now in ${moveTo || '“No sequence”'}` : ''}`);
+      } catch (e) { toast(`Not deleted: ${friendlySeq(e)}`, 'error', 8000); }
+    }
+
+    draw();
+    void dlg;
+  }
+
+  function friendlySeq(e) {
+    const m = errMsg(e);
+    if (/rename_sequence|delete_sequence|schema cache|function/i.test(m) && /not find|does not exist|schema cache/i.test(m)) {
+      return 'Renaming and deleting need supabase/007_sequence_admin.sql. An admin must run it once in the Supabase SQL Editor.';
+    }
+    return m;
+  }
 
   // Reference counts per sequence, shown as a paperclip in the Seq column.
   let refCounts = new Map();

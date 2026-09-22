@@ -781,3 +781,10 @@ table.review tr.conflict td:first-child { box-shadow: inset 3px 0 0 var(--st-hld
 }
 .form label.check { display: inline-flex; align-items: center; gap: 6px; }
 .modal:has(.new-task) { width: min(620px, 100%); }
+
+.seq-admin { max-height: 55vh; overflow: auto; }
+.seq-table input { width: 100%; min-height: 28px; padding: 3px 7px; }
+.seq-table .seq-name-input { font-family: var(--mono); font-weight: 600; max-width: 160px; }
+.seq-table td.num { text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.seq-table tr.focus td { background: var(--accent-soft); }
+.group-edit { margin-left: 10px; }

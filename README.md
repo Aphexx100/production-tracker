@@ -18,6 +18,7 @@ Try the interface without any setup: run it locally (see below) and open `/?demo
 | Editor | Headings, font size, bold, italic, underline, strike, inline code, text color, highlight, bullet, numbered and check lists, alignment, quotes, dividers, tables, links, images (paste, drop or upload), undo and redo, clear formatting, print or save as PDF |
 | Grid | Click to select, type to edit, Enter/Tab/arrow keys, Delete clears, Ctrl+C copies, Ctrl+V pastes (including whole blocks copied from Excel or Google Sheets), Ctrl+D duplicates |
 | Rows | Add (auto-numbers `SQ010_0010`, then `_0020`), insert below, duplicate, delete, drag to reorder |
+| Sequences | Rename (updates shots, references and milestones at once; renaming onto an existing name merges), add a title, delete (shots are kept and moved) — More › Manage sequences, or “Edit sequence” on a group header |
 | View | Sort by any column, filter by status and assignee, search, hide omitted, group by sequence, show or hide and resize columns, Status and Shot columns stay pinned while you scroll |
 | Totals | Shot count, total length in frames and timecode at the project frame rate, status breakdown |
 | Data | CSV export of the current view, CSV import that matches column headers |
@@ -51,6 +52,8 @@ The Supabase URL and the anon (publishable) key are built into the public site. 
 7. Open a new query, paste [`supabase/005_tasks.sql`](supabase/005_tasks.sql) and click **Run**. This adds the Tasks tab.
 
 8. Open a new query, paste [`supabase/006_task_priority.sql`](supabase/006_task_priority.sql) and click **Run**. This adds task priorities.
+
+9. Open a new query, paste [`supabase/007_sequence_admin.sql`](supabase/007_sequence_admin.sql) and click **Run**. This lets you rename and delete sequences.
 
 Existing projects only need the numbered files they have not run yet. Every file is safe to run again.
 
@@ -112,6 +115,7 @@ supabase/003_upload_limit.sql upload size setting
 supabase/004_timeline.sql     dates on sequences and shots, milestones and deadlines
 supabase/005_tasks.sql        task due dates, milestone and call links
 supabase/006_task_priority.sql task priority
+supabase/007_sequence_admin.sql rename / delete sequences everywhere at once
 supabase/functions/extract-tasks/index.ts   Edge Function: Claude reads a call summary
 src/main.js           boot, sign-in gate, tabs
 src/auth.js           sign in, register, password reset, approval screen

@@ -619,6 +619,58 @@ try {
   await page.setViewportSize({ width: 1440, height: 900 });
   ok('long task text and names stay inside their column at every width');
 
+  // rename / merge / delete sequences from the shot tracker
+  await page.goto(`${URL_}#shots`);
+  await page.waitForSelector('tr.shot-row');
+  const seqDb = () => page.evaluate(() => JSON.parse(localStorage.getItem('pt-demo-db-v1')));
+  const openSeqAdmin = async () => {
+    await page.click('#pane-shots .shot-toolbar button:has-text("More")');
+    await page.click('.ctx-menu button:has-text("Manage sequences")');
+    await page.waitForSelector('.seq-table');
+  };
+  await openSeqAdmin();
+  const before = (await seqDb()).shots.filter((x) => x.sequence === 'SQ020').length;
+  await page.fill('.seq-table tr[data-seq="SQ020"] input.seq-name-input', 'SQ025');
+  await page.press('.seq-table tr[data-seq="SQ020"] input.seq-name-input', 'Enter');
+  await page.waitForSelector('.seq-table tr[data-seq="SQ025"]');
+  let sdb = await seqDb();
+  assert.equal(sdb.shots.filter((x) => x.sequence === 'SQ025').length, before);
+  assert.equal(sdb.shots.filter((x) => x.sequence === 'SQ020').length, 0);
+  assert.ok(sdb.refs.some((r) => r.sequence === 'SQ025') && !sdb.refs.some((r) => r.sequence === 'SQ020'));
+  assert.equal(sdb.sequences.find((q) => q.code === 'SQ025').title, 'Café night');
+  assert.ok(await page.locator('tr.shot-row td[data-key="sequence"] > span', { hasText: 'SQ025' }).count());
+  ok('rename a sequence: shots, references and title follow');
+
+  await page.fill('.seq-table tr[data-seq="Rooftop escape"] input.seq-name-input', 'SQ025');
+  await page.press('.seq-table tr[data-seq="Rooftop escape"] input.seq-name-input', 'Enter');
+  await page.waitForSelector('.modal button:has-text("Merge")');
+  assert.ok(await page.locator('.seq-table tr[data-seq="Rooftop escape"]').count(), 'nothing merged before confirming');
+  await page.click('.modal button:has-text("Merge")');
+  await page.waitForFunction(() => !document.querySelector('.seq-table tr[data-seq="Rooftop escape"]'));
+  sdb = await seqDb();
+  assert.ok(!sdb.sequences.some((q) => q.code === 'Rooftop escape'));
+  ok('renaming onto an existing sequence asks, then merges');
+
+  const sq040Shots = sdb.shots.filter((x) => x.sequence === 'SQ040').map((x) => x.id);
+  assert.ok(sq040Shots.length);
+  await page.click('.seq-table tr[data-seq="SQ040"] button:has-text("Delete")');
+  await page.waitForSelector('.modal:has-text("Delete sequence SQ040?")');
+  await page.selectOption('.modal select[aria-label="Move its shots to"]', 'SQ010');
+  await page.click('.modal button:has-text("Delete sequence")');
+  await page.waitForFunction(() => !document.querySelector('.seq-table tr[data-seq="SQ040"]'));
+  sdb = await seqDb();
+  assert.ok(!sdb.sequences.some((q) => q.code === 'SQ040'));
+  assert.deepEqual(sdb.shots.filter((x) => sq040Shots.includes(x.id)).map((x) => x.sequence), sq040Shots.map(() => 'SQ010'));
+  await page.keyboard.press('Escape');
+  ok('delete a sequence: its shots move to the chosen sequence, none are deleted');
+
+  await page.check('#pane-shots label.check:has-text("Group by sequence") input');
+  await page.click('tr.group-row:has-text("SQ025") button:has-text("Edit sequence")');
+  await page.waitForSelector('.seq-table tr.focus[data-seq="SQ025"]');
+  await page.keyboard.press('Escape');
+  await page.uncheck('#pane-shots label.check:has-text("Group by sequence") input');
+  ok('group headers open the sequence editor');
+
   // security: stored markup must not run script
   await page.evaluate(() => {
     const db = JSON.parse(localStorage.getItem('pt-demo-db-v1'));

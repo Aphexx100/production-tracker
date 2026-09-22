@@ -123,6 +123,10 @@ export function createSupabaseApi(url, anonKey) {
       list: async () => unwrap(await sb.from('sequences').select('*').order('sort_order').order('code')),
       upsert: async (row) => unwrap(await sb.from('sequences').upsert(row, { onConflict: 'code' }).select().single()),
       remove: async (code) => { unwrap(await sb.from('sequences').delete().eq('code', code)); },
+      /** Rename everywhere (shots, references, milestones) in one transaction; merges into an existing name. */
+      rename: async (oldCode, newCode) => { unwrap(await sb.rpc('rename_sequence', { old_code: oldCode, new_code: newCode })); },
+      /** Delete; its shots, references and milestones move to moveTo ('' = no sequence). */
+      deleteAndMove: async (code, moveTo) => { unwrap(await sb.rpc('delete_sequence', { seq_code: code, move_to: moveTo || '' })); },
     },
 
     refs: table('refs', [['created_at', true]]),

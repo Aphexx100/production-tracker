@@ -207,6 +207,21 @@ export function createDemoApi() {
         save(); return clone(next);
       },
       remove: async (code) => { db.sequences = db.sequences.filter((x) => x.code !== code); save(); },
+      rename: async (oldCode, newCode) => {
+        newCode = String(newCode || '').trim();
+        if (!newCode || newCode.length > 40) throw new Error('Sequence names must be 1 to 40 characters');
+        if (oldCode === newCode) return;
+        if (db.sequences.some((x) => x.code === newCode)) db.sequences = db.sequences.filter((x) => x.code !== oldCode);
+        else db.sequences.forEach((x) => { if (x.code === oldCode) x.code = newCode; });
+        for (const t of ['shots', 'refs', 'milestones']) db[t].forEach((r) => { if (r.sequence === oldCode) r.sequence = newCode; });
+        save();
+      },
+      deleteAndMove: async (code, moveTo = '') => {
+        if (moveTo === code) throw new Error('Choose a different sequence to move its shots to');
+        for (const t of ['shots', 'refs', 'milestones']) db[t].forEach((r) => { if (r.sequence === code) r.sequence = moveTo; });
+        db.sequences = db.sequences.filter((x) => x.code !== code);
+        save();
+      },
     },
     milestones: table('milestones', (a, b) => a.date.localeCompare(b.date)),
     // Demo only: a simple pattern matcher stands in for Claude, so the flow can be tried offline.

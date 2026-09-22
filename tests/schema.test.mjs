@@ -38,6 +38,7 @@ const limitSql = readFileSync(new URL('../supabase/003_upload_limit.sql', import
 const timelineSql = readFileSync(new URL('../supabase/004_timeline.sql', import.meta.url), 'utf8');
 const tasksSql = readFileSync(new URL('../supabase/005_tasks.sql', import.meta.url), 'utf8');
 const prioSql = readFileSync(new URL('../supabase/006_task_priority.sql', import.meta.url), 'utf8');
+const seqAdminSql = readFileSync(new URL('../supabase/007_sequence_admin.sql', import.meta.url), 'utf8');
 for (let i = 0; i < 2; i++) { // twice: every file must be safe to re-run
   await db.exec(sql);
   await db.exec(refsSql);
@@ -45,6 +46,7 @@ for (let i = 0; i < 2; i++) { // twice: every file must be safe to re-run
   await db.exec(timelineSql);
   await db.exec(tasksSql);
   await db.exec(prioSql);
+  await db.exec(seqAdminSql);
 }
 
 const ADMIN = '00000000-0000-0000-0000-00000000000a';
@@ -208,5 +210,37 @@ r = await db.query(`select priority from public.todos where body = 'Deliver cut'
 await as(MEMBER, `update public.todos set priority = 'urgent' where body = 'Deliver cut'`);
 await fails(MEMBER, `update public.todos set priority = 'asap' where body = 'Deliver cut'`);
 ok('tasks: priority defaults to normal, only low/normal/high/urgent');
+
+// rename / delete sequences
+await as(MEMBER, `insert into public.sequences (code, title) values ('SQ050', 'Rooftop') on conflict do nothing`);
+await as(MEMBER, `insert into public.shots (shot_name, sequence) values ('RT_0010', 'SQ050'), ('RT_0020', 'SQ050')`);
+await as(MEMBER, `insert into public.refs (sequence, kind, url) values ('SQ050', 'link', 'https://example.com/roof')`);
+await as(MEMBER, `insert into public.milestones (title, date, sequence) values ('Roof shoot', '2026-11-01', 'SQ050')`);
+await as(MEMBER, `select public.rename_sequence('SQ050', 'SQ055')`);
+const cnt = async (q) => (await db.query(q)).rows[0].n;
+assert.equal(await cnt(`select count(*)::int n from public.shots where sequence = 'SQ055'`), 2);
+assert.equal(await cnt(`select count(*)::int n from public.refs where sequence = 'SQ055'`), 1);
+assert.equal(await cnt(`select count(*)::int n from public.milestones where sequence = 'SQ055'`), 1);
+r = await db.query(`select title from public.sequences where code = 'SQ055'`); assert.equal(r.rows[0].title, 'Rooftop');
+assert.equal(await cnt(`select count(*)::int n from public.sequences where code = 'SQ050'`), 0);
+await fails(MEMBER, `select public.rename_sequence('SQ055', '   ')`);
+await fails(PENDING, `select public.rename_sequence('SQ055', 'X')`);
+await fails(null, `select public.rename_sequence('SQ055', 'X')`);
+ok('rename a sequence: shots, references, milestones and its title move together');
+
+await as(MEMBER, `select public.rename_sequence('SQ055', 'SQ010')`); // merge into existing
+assert.equal(await cnt(`select count(*)::int n from public.shots where shot_name like 'RT_%' and sequence = 'SQ010'`), 2);
+assert.equal(await cnt(`select count(*)::int n from public.sequences where code = 'SQ055'`), 0);
+r = await db.query(`select title from public.sequences where code = 'SQ010'`); assert.equal(r.rows[0].title, 'Harbour chase');
+ok('renaming onto an existing name merges into it');
+
+await as(MEMBER, `select public.rename_sequence('SQ010', 'SQ060')`);
+await as(MEMBER, `select public.delete_sequence('SQ060', '')`);
+assert.equal(await cnt(`select count(*)::int n from public.shots where shot_name like 'RT_%' and sequence = ''`), 2);
+assert.equal(await cnt(`select count(*)::int n from public.sequences where code = 'SQ060'`), 0);
+assert.equal(await cnt(`select count(*)::int n from public.shots where shot_name like 'RT_%'`), 2, 'shots are never deleted');
+await fails(MEMBER, `select public.delete_sequence('SQ020', 'SQ020')`);
+await fails(PENDING, `select public.delete_sequence('SQ020', '')`);
+ok('delete a sequence: its shots, references and milestones move, nothing is lost');
 
 console.log(`schema: ${passed} checks passed`);
