@@ -34,10 +34,12 @@ await db.exec(`
 const sql = readFileSync(new URL('../supabase/schema.sql', import.meta.url), 'utf8')
   .replaceAll('ADMIN_EMAIL_HERE', 'boss@example.com');
 const refsSql = readFileSync(new URL('../supabase/002_references.sql', import.meta.url), 'utf8');
-await db.exec(sql);
-await db.exec(refsSql);
-await db.exec(sql); // idempotent
-await db.exec(refsSql);
+const limitSql = readFileSync(new URL('../supabase/003_upload_limit.sql', import.meta.url), 'utf8');
+for (let i = 0; i < 2; i++) { // twice: every file must be safe to re-run
+  await db.exec(sql);
+  await db.exec(refsSql);
+  await db.exec(limitSql);
+}
 
 const ADMIN = '00000000-0000-0000-0000-00000000000a';
 const MEMBER = '00000000-0000-0000-0000-00000000000b';
@@ -52,7 +54,7 @@ await db.exec(`
 async function as(uid, q, params) {
   await db.exec(`reset role; set request.jwt.claim.sub = '${uid ?? ''}'; set role ${uid ? 'authenticated' : 'anon'};`);
   try { return await db.query(q, params); }
-  finally { await db.exec('reset role;'); }
+  finally { await db.exec("reset role; set request.jwt.claim.sub = '';"); }
 }
 async function fails(uid, q) {
   try { await as(uid, q); } catch (e) { return e.message; }
@@ -112,7 +114,10 @@ ok('todos restricted to team members, dailies writable');
 await fails(MEMBER, `insert into public.team_members (name) values ('Eve')`);
 r = await as(MEMBER, `update public.project_settings set fps = 25 returning *`); assert.equal(r.rows.length, 0);
 r = await as(ADMIN, `update public.project_settings set fps = 25 returning fps`); assert.equal(Number(r.rows[0].fps), 25);
-ok('settings and team editable by admin only');
+r = await as(ADMIN, `update public.project_settings set max_upload_mb = 500 returning max_upload_mb`); assert.equal(r.rows[0].max_upload_mb, 500);
+await fails(ADMIN, `update public.project_settings set max_upload_mb = 0`);
+r = await as(MEMBER, `update public.project_settings set max_upload_mb = 5 returning 1`); assert.equal(r.rows.length, 0);
+ok('settings and team editable by admin only (incl. upload limit)');
 
 // unconfirmed email never counts as approved, even if flagged
 await db.exec(`update public.profiles set approved = true where id = '${FAKE}'`);

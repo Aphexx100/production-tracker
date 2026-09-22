@@ -26,7 +26,7 @@ function seed() {
     shot(4, { sequence: 'SQ020', scene: '14', shot_name: 'SQ020_0010', description: '<p>Interior café, over-the-shoulder.</p>', shot_type: 'OTS', lens: '35mm', frame_out: 1150, location: 'Café', int_ext: 'INT', day_night: 'NIGHT', assignee: 'Miguel', priority: 'urgent' }),
   ];
   return {
-    settings: { id: 1, project_name: 'Demo Production', fps: 24 },
+    settings: { id: 1, project_name: 'Demo Production', fps: 24, max_upload_mb: 50 },
     team: ['Mihai', 'Miguel', 'Rafael', 'Micael', 'Sascha'].map((name, i) => ({ name, sort_order: i + 1 })),
     profiles: [ME, { id: 'demo-2', email: 'crew@example.com', display_name: 'New Crew', role: 'member', approved: false, created_at: now }],
     dailies: [

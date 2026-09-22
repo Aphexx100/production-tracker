@@ -205,6 +205,22 @@ try {
   await page.waitForFunction(() => document.querySelector('section.seq[data-seq="SQ020"]').textContent.includes('vimeo.com/123456'));
   ok('dropping a web link adds it to Links');
 
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array(60 * 1024 * 1024)], 'huge_script.pdf', { type: 'application/pdf' }));
+    const el = document.querySelector('section.seq[data-seq=""]');
+    for (const type of ['dragenter', 'dragover', 'drop']) el.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  await page.waitForSelector('.modal:has-text("File too large to upload")');
+  assert.match(await page.textContent('.modal'), /50 MB per file.*huge_script\.pdf · 60 MB/s);
+  assert.equal(await page.locator('section.seq[data-seq=""] .upload-item').count(), 0, 'nothing uploaded');
+  await page.click('.modal button:has-text("Add as link instead")');
+  assert.equal(await page.inputValue('.modal input[aria-label="Link title"]'), 'huge_script');
+  await page.fill('.modal input[aria-label="Link URL"]', 'drive.google.com/file/d/abc');
+  await page.click('.modal button:has-text("Add link")');
+  await page.waitForFunction(() => document.querySelector('section.seq[data-seq=""]').textContent.includes('huge_script'));
+  ok('too-large file refused before upload, offered as link instead');
+
   await seq('SQ010').locator('.ref-card', { hasText: 'mood' }).click();
   await page.waitForSelector('.viewer-stage img[src^="blob:"]');
   await page.keyboard.press('Escape');

@@ -351,5 +351,6 @@ $$;
 
 -- ---------------------------------------------------------------------
 -- More tables live in numbered files next to this one. Run them after
--- this file, in order: 002_references.sql (References tab).
+-- this file, in order: 002_references.sql (References tab),
+-- 003_upload_limit.sql (upload size setting).
 -- ---------------------------------------------------------------------

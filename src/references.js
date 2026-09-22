@@ -58,6 +58,12 @@ export function normalizeUrl(raw) {
 const canPreviewImage = (r) => r.kind === 'image' && /^image\/(png|jpe?g|gif|webp|avif|svg\+xml|bmp)$/.test(r.mime || '');
 const canPlay = (r) => (r.kind === 'video' || r.kind === 'audio') && /^(video|audio)\//.test(r.mime || '');
 
+/** Per-file upload limit (admin setting; Supabase free plan = 50 MB). */
+export function uploadLimitBytes() {
+  const mb = Number(state.settings?.max_upload_mb) || 50;
+  return mb * 1024 * 1024;
+}
+
 // ---------- thumbnails (made in the browser at upload time) ----------
 const THUMB_EDGE = 480;
 
@@ -314,7 +320,12 @@ export function mountReferences(root) {
   root.addEventListener('drop', stopStray);
 
   // ---------- actions ----------
-  async function uploadFiles(code, files) {
+  async function uploadFiles(code, all) {
+    // Refuse files over the project limit before sending a single byte.
+    const limit = uploadLimitBytes();
+    const tooBig = all.filter((f) => f.size > limit);
+    const files = all.filter((f) => f.size <= limit);
+    if (tooBig.length) explainTooBig(code, tooBig, limit);
     if (!files.length) return;
     const q = uploads.get(code) || [];
     uploads.set(code, q);
@@ -339,6 +350,23 @@ export function mountReferences(root) {
     await Promise.all([worker(), worker()]);
     if (!q.length) uploads.delete(code);
     renderMain(); renderNav();
+  }
+
+  function explainTooBig(code, files, limit) {
+    const m = modal(files.length === 1 ? 'File too large to upload' : 'Files too large to upload', [
+      h('p', `The upload limit for this project is ${fmtSize(limit)} per file. Not uploaded:`),
+      h('ul.too-big', files.map((f) => h('li', h('strong', f.name), ` · ${fmtSize(f.size)}`))),
+      h('p', h('strong', 'What you can do:')),
+      h('ul.tips',
+        h('li', 'Make the file smaller. For a PDF: Acrobat › File › Save as Other › Reduced Size PDF. For a movie: export a lower-bitrate review copy (e.g. H.264, 1080p).'),
+        h('li', 'Put the file on Google Drive, Dropbox or Frame.io, share it with the team only, and add it here as a link.'),
+        h('li', isAdmin()
+          ? 'Raise the limit: on a paid Supabase plan, increase Storage › Settings › Upload file size limit, then set the same number in Admin › Upload limit.'
+          : 'Ask an admin whether the upload limit can be raised (needs a paid Supabase plan).')),
+      h('div.row.end',
+        h('button.btn', { type: 'button', on: { click: () => m.close() } }, 'Close'),
+        h('button.btn.primary', { type: 'button', on: { click: () => { m.close(); addLink(code, files[0].name.replace(/\.[^.]+$/, '')); } } }, icon('link', 14), 'Add as link instead')),
+    ]);
   }
 
   async function uploadOne(code, job) {
@@ -372,9 +400,9 @@ export function mountReferences(root) {
     } catch (e) { toast(`Could not add link: ${errMsg(e)}`, 'error', 6000); }
   }
 
-  function addLink(code) {
-    const url = h('input', { type: 'url', placeholder: 'https://…', required: true, 'aria-label': 'Link URL' });
-    const title = h('input', { placeholder: 'Optional, e.g. “Location scout video”', maxLength: 300, 'aria-label': 'Link title' });
+  function addLink(code, presetTitle = '') {
+    const url = h('input', { type: 'text', inputMode: 'url', autocomplete: 'url', placeholder: 'https://… or drive.google.com/…', required: true, 'aria-label': 'Link URL' });
+    const title = h('input', { value: presetTitle, placeholder: 'Optional, e.g. “Location scout video”', maxLength: 300, 'aria-label': 'Link title' });
     const notes = h('textarea', { rows: 3, maxLength: 4000, 'aria-label': 'Notes' });
     const msg = h('p.form-msg');
     const m = modal(`Add link to ${seqLabel(code)}`, h('form.form', {
@@ -396,7 +424,7 @@ export function mountReferences(root) {
     notes.value = r.notes || '';
     const seqSel = h('select', { 'aria-label': 'Sequence' }, sequences().map((c) => h('option', { value: c }, seqLabel(c))));
     seqSel.value = r.sequence;
-    const url = r.kind === 'link' ? h('input', { type: 'url', value: r.url, 'aria-label': 'URL' }) : null;
+    const url = r.kind === 'link' ? h('input', { type: 'text', inputMode: 'url', value: r.url, 'aria-label': 'URL' }) : null;
     const m = modal('Edit reference', h('form.form', {
       on: { submit: async (e) => {
         e.preventDefault();

@@ -42,9 +42,11 @@ The Supabase URL and the anon (publishable) key are built into the public site. 
 3. In the pasted SQL, replace `ADMIN_EMAIL_HERE` with the email address of the first admin. Then click **Run**.
 4. Open a new query, paste the contents of [`supabase/002_references.sql`](supabase/002_references.sql) and click **Run**. This adds the References tab.
 
-Projects set up before the References tab existed only need step 4.
+5. Open a new query, paste [`supabase/003_upload_limit.sql`](supabase/003_upload_limit.sql) and click **Run**. This adds the upload size setting.
 
-**Upload size:** Supabase limits the size of each uploaded file for the whole project (50 MB on the free plan). To allow bigger movies, raise it under **Storage > Settings** (paid plans allow up to 500 GB per file).
+Existing projects only need the numbered files they have not run yet. Every file is safe to run again.
+
+**Upload size:** Supabase limits the size of each uploaded file for the whole project (50 MB on the free plan). To allow bigger movies, raise it under **Storage > Settings** (paid plans allow up to 500 GB per file), then set the same number in the app under **Admin > Upload limit**. The app refuses larger files before uploading and offers to add them as a link instead.
 
 ### 2. Configure authentication
 
@@ -88,6 +90,7 @@ npm run check
 ```
 supabase/schema.sql   tables, row-level security, storage bucket, realtime
 supabase/002_references.sql   sequences + references tables, "references" bucket
+supabase/003_upload_limit.sql upload size setting
 src/main.js           boot, sign-in gate, tabs
 src/auth.js           sign in, register, password reset, approval screen
 src/dailies.js        daily summaries: day list and editor

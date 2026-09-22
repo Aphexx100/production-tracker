@@ -36,6 +36,13 @@ export async function openAdmin() {
   const teamBox = h('div');
   const projName = h('input', { value: state.settings.project_name, maxLength: 120, 'aria-label': 'Project name' });
   const fps = h('input', { type: 'number', min: 1, max: 240, step: 0.001, value: state.settings.fps, 'aria-label': 'Frame rate' });
+  // max_upload_mb exists once supabase/003_upload_limit.sql has been run.
+  const hasLimit = state.settings.max_upload_mb !== undefined;
+  const maxUpload = h('input', {
+    type: 'number', min: 1, max: 500000, step: 1, value: state.settings.max_upload_mb ?? 50, disabled: !hasLimit,
+    'aria-label': 'Upload limit in MB',
+    title: hasLimit ? 'Keep equal to Supabase › Storage › Settings › Upload file size limit (50 MB on the free plan).' : 'Run supabase/003_upload_limit.sql in the Supabase SQL Editor to enable this setting.',
+  });
 
   modal('Admin', [
     h('section', h('h3', 'Users'), h('p.faint', 'New accounts cannot see anything until you approve them. Only approve people you know.'), usersBox),
@@ -43,11 +50,16 @@ export async function openAdmin() {
       h('form.form.inline', { on: { submit: async (e) => {
         e.preventDefault();
         try {
-          state.settings = await api().settings.update({ project_name: projName.value.trim() || 'Untitled Production', fps: Number(fps.value) || 24 });
+          const patch = { project_name: projName.value.trim() || 'Untitled Production', fps: Number(fps.value) || 24 };
+          if (hasLimit) patch.max_upload_mb = Math.max(1, Math.round(Number(maxUpload.value) || 50));
+          state.settings = await api().settings.update(patch);
           emit('settings-changed');
           toast('Project settings saved');
         } catch (err) { toast(errMsg(err), 'error'); }
-      } } }, h('label', 'Name', projName), h('label', 'FPS', fps), h('button.btn', { type: 'submit' }, 'Save'))),
+      } } }, h('label', 'Name', projName), h('label', 'FPS', fps), h('label', 'Upload limit (MB)', maxUpload), h('button.btn', { type: 'submit' }, 'Save')),
+      h('p.faint', hasLimit
+        ? 'Upload limit: files larger than this are refused before uploading. Keep it equal to Supabase › Storage › Settings (50 MB on the free plan).'
+        : 'Upload limit setting: run supabase/003_upload_limit.sql in the Supabase SQL Editor to enable it. Until then the app uses 50 MB.')),
     h('section', h('h3', 'Team (to-do lists)'), teamBox),
   ], { wide: true });
 
