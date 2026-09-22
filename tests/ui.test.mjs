@@ -9,7 +9,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const server = await preview({ root, preview: { port: 5199, strictPort: true }, logLevel: 'silent' });
 const URL_ = 'http://localhost:5199/?demo';
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Berlin' });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
