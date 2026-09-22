@@ -35,10 +35,12 @@ const sql = readFileSync(new URL('../supabase/schema.sql', import.meta.url), 'ut
   .replaceAll('ADMIN_EMAIL_HERE', 'boss@example.com');
 const refsSql = readFileSync(new URL('../supabase/002_references.sql', import.meta.url), 'utf8');
 const limitSql = readFileSync(new URL('../supabase/003_upload_limit.sql', import.meta.url), 'utf8');
+const timelineSql = readFileSync(new URL('../supabase/004_timeline.sql', import.meta.url), 'utf8');
 for (let i = 0; i < 2; i++) { // twice: every file must be safe to re-run
   await db.exec(sql);
   await db.exec(refsSql);
   await db.exec(limitSql);
+  await db.exec(timelineSql);
 }
 
 const ADMIN = '00000000-0000-0000-0000-00000000000a';
@@ -164,5 +166,24 @@ r = await as(MEMBER, `delete from storage.objects where name = 'm.mp4' returning
 r = await as(ADMIN, `delete from storage.objects where name = 'a.mp4' returning 1`); assert.equal(r.rows.length, 1);
 r = await db.query(`select public from storage.buckets where id = 'references'`); assert.equal(r.rows[0].public, false);
 ok('references bucket: private, upload by approved users, delete by owner or admin');
+
+// timeline
+await as(MEMBER, `insert into public.shots (shot_name, start_date, end_date) values ('TL_0010', '2026-10-01', '2026-10-05')`);
+await fails(MEMBER, `insert into public.shots (shot_name, start_date, end_date) values ('bad', '2026-10-05', '2026-10-01')`);
+await as(MEMBER, `update public.sequences set start_date = '2026-10-01', end_date = '2026-11-01', color = '#f5a524' where code = 'SQ010'`);
+await fails(MEMBER, `update public.sequences set start_date = '2026-11-02' where code = 'SQ010'`);
+await fails(MEMBER, `update public.sequences set color = 'red;drop' where code = 'SQ010'`);
+const tlShot = (await db.query(`select id from public.shots where shot_name = 'TL_0010'`)).rows[0].id;
+await as(MEMBER, `insert into public.milestones (title, kind, date) values ('Picture lock', 'deadline', '2026-12-01')`);
+await as(MEMBER, `insert into public.milestones (title, date, sequence) values ('SQ010 shoot', '2026-10-02', 'SQ010')`);
+await as(MEMBER, `insert into public.milestones (title, kind, date, shot_id) values ('Turnover', 'deadline', '2026-10-10', '${tlShot}')`);
+await fails(MEMBER, `insert into public.milestones (title, kind, date) values ('x', 'party', '2026-10-10')`);
+await fails(MEMBER, `insert into public.milestones (title, date) values ('   ', '2026-10-10')`);
+r = await as(PENDING, 'select * from public.milestones'); assert.equal(r.rows.length, 0);
+await fails(null, 'select * from public.milestones');
+ok('timeline: date ranges validated, milestones/deadlines scoped to project, sequence or shot');
+await as(MEMBER, `delete from public.shots where id = '${tlShot}'`);
+r = await db.query(`select count(*)::int n from public.milestones where title = 'Turnover'`); assert.equal(r.rows[0].n, 0);
+ok('deleting a shot removes its milestones');
 
 console.log(`schema: ${passed} checks passed`);

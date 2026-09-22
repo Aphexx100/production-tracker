@@ -240,7 +240,6 @@ try {
   assert.ok(Math.abs(geo.prevMid - geo.imgMid) < 2 && Math.abs(geo.nextMid - geo.imgMid) < 2, JSON.stringify(geo));
   assert.ok(geo.prevVisible && !geo.scrolls && geo.modalH > geo.vh * 0.9 && geo.modalW > geo.vw * 0.9, JSON.stringify(geo));
   assert.doesNotMatch(geo.caption, /null|undefined/);
-  await page.screenshot({ path: 'test-results/viewer.png' });
   await page.keyboard.press('Escape');
   await page.waitForSelector('.viewer-stage', { state: 'detached' });
   ok('viewer fills the window, arrows centered on the picture, no scrolling');
@@ -322,6 +321,114 @@ try {
   await page.waitForSelector('section.seq[data-seq="SQ040"]');
   assert.ok(await page.locator('section.seq[data-seq="Rooftop escape"]').count(), 'unused sequence stays');
   ok('new sequence can be created from the shot tracker and appears in References');
+
+  // ---- timeline ----
+  await page.click('#tab-timeline');
+  await page.waitForSelector('.tl-row[data-key="seq:SQ010"]');
+  const demoDb = () => page.evaluate(() => JSON.parse(localStorage.getItem('pt-demo-db-v1')));
+  const keys = await page.$$eval('.tl-row', (els) => els.map((e) => e.dataset.key));
+  assert.equal(keys[0], 'project');
+  assert.ok(keys.includes('seq:SQ010') && keys.includes('seq:SQ020') && keys.includes('seq:Rooftop escape'), keys.join('|'));
+  assert.ok(await page.locator('.tl-row[data-key="project"] .tl-ms.deadline:has-text("Picture lock")').count());
+  assert.ok(await page.locator('.tl-dline').count(), 'project deadline drawn across all rows');
+  assert.ok(await page.locator('.tl-chip:has-text("Picture lock")').count(), 'upcoming chip');
+  ok('timeline lists project, sequences, milestones and deadlines');
+
+  await page.locator('.tl-row[data-key="seq:SQ010"] .caret').click();
+  await page.waitForSelector('.tl-row.tl-shot');
+  const shotKeys = await page.$$eval('.tl-row.tl-shot .tl-shot-name', (els) => els.map((e) => e.textContent));
+  assert.deepEqual(shotKeys, ['SQ010_0010', 'SQ010_0020', 'SQ010_0030']);
+  ok('sequence expands into its shots');
+
+  async function dragBy(locator, dx, where = 'center') {
+    const b = await locator.boundingBox();
+    const y = b.y + b.height / 2;
+    const x0 = where === 'right' ? b.x + b.width - 2 : where === 'left' ? b.x + 2 : b.x + b.width / 2;
+    await page.mouse.move(x0, y);
+    await page.mouse.down();
+    await page.mouse.move(x0 + dx / 2, y, { steps: 3 });
+    await page.mouse.move(x0 + dx, y, { steps: 3 });
+    await page.mouse.up();
+  }
+  const dw = 14; // week zoom
+  const seqBefore = (await demoDb()).sequences.find((q) => q.code === 'SQ010');
+  await dragBy(page.locator('.tl-row[data-key="seq:SQ010"] .tl-bar'), 3 * dw);
+  await page.waitForFunction((prev) => {
+    const q = JSON.parse(localStorage.getItem('pt-demo-db-v1')).sequences.find((x) => x.code === 'SQ010');
+    return q.start_date !== prev;
+  }, seqBefore.start_date);
+  const seqAfter = (await demoDb()).sequences.find((q) => q.code === 'SQ010');
+  const plus = (iso, n) => new Date(Date.parse(iso) + n * 864e5).toISOString().slice(0, 10);
+  assert.equal(seqAfter.start_date, plus(seqBefore.start_date, 3));
+  assert.equal(seqAfter.end_date, plus(seqBefore.end_date, 3));
+  ok('drag a sequence bar moves both dates');
+
+  const shot1 = (await demoDb()).shots.find((s) => s.shot_name === 'SQ010_0010');
+  await dragBy(page.locator('.tl-row.tl-shot').first().locator('.tl-bar'), 2 * dw, 'right');
+  await page.waitForFunction((id) => JSON.parse(localStorage.getItem('pt-demo-db-v1')).shots.find((s) => s.id === id).end_date !== null
+    && JSON.parse(localStorage.getItem('pt-demo-db-v1')).shots.find((s) => s.id === id).updated_at, shot1.id);
+  await page.waitForTimeout(200);
+  const shot1b = (await demoDb()).shots.find((s) => s.id === shot1.id);
+  assert.equal(shot1b.end_date, plus(shot1.end_date, 2));
+  assert.equal(shot1b.start_date, shot1.start_date);
+  ok('drag the end of a shot bar changes only its end date');
+
+  const emptyTrack = page.locator('.tl-row.tl-shot').nth(2).locator('.tl-track');
+  const tb = await emptyTrack.boundingBox();
+  const todayX = (await page.locator('.tl-today').boundingBox()).x;
+  await page.mouse.move(todayX + 1, tb.y + tb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(todayX + 1 + 4 * dw, tb.y + tb.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('pt-demo-db-v1')).shots.find((s) => s.shot_name === 'SQ010_0030').start_date);
+  const planned = (await demoDb()).shots.find((s) => s.shot_name === 'SQ010_0030');
+  const todayIso = await page.evaluate(() => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); });
+  assert.equal(planned.start_date, todayIso);
+  assert.equal(planned.end_date, plus(todayIso, 4));
+  ok('drag across an empty shot row plans its dates');
+
+  await page.locator('.tl-row[data-key="project"] .tl-track').dblclick({ position: { x: 300, y: 17 } });
+  await page.click('.ctx-menu button:has-text("Add deadline here")');
+  await page.fill('.modal input[aria-label="Title"]', 'Final sound mix');
+  await page.click('.modal button:has-text("Add")');
+  await page.waitForSelector('.tl-row[data-key="project"] .tl-ms.deadline:has-text("Final sound mix")');
+  ok('double-click a row to add a deadline');
+
+  await page.click('.tl-toolbar button:has-text("Milestone")');
+  await page.fill('.modal input[aria-label="Title"]', 'Hair & makeup test');
+  const shot2 = (await demoDb()).shots.find((s) => s.shot_name === 'SQ010_0020');
+  await page.selectOption('.modal select[aria-label="Belongs to"]', `shot:${shot2.id}`);
+  await page.click('.modal button:has-text("Add")');
+  const shot2Row = page.locator('.tl-row.tl-shot', { has: page.locator('.tl-shot-name', { hasText: 'SQ010_0020' }) });
+  await shot2Row.locator('.tl-ms.milestone:has-text("Hair & makeup test")').waitFor();
+  ok('milestone can belong to a single shot');
+
+  await page.locator('.tl-ms:has-text("Final sound mix")').click();
+  await page.check('.modal input[type=checkbox]');
+  await page.click('.modal button:has-text("Save")');
+  await page.waitForSelector('.tl-ms.done:has-text("Final sound mix")');
+  await page.uncheck('.tl-toolbar input[type=checkbox]');
+  await page.waitForFunction(() => !document.querySelector('.tl-ms.done'));
+  await page.check('.tl-toolbar input[type=checkbox]');
+  ok('mark a deadline as met; hide completed');
+
+  await page.click('.seg-btn:has-text("Days")');
+  await page.waitForSelector('.tl-tick b');
+  await page.click('.seg-btn:has-text("Months")');
+  await page.click('.seg-btn:has-text("Weeks")');
+  ok('zoom days / weeks / months');
+
+  await page.locator('.tl-shot-name', { hasText: 'SQ010_0030' }).click();
+  await page.waitForSelector('#pane-shots:not([hidden]) td.sel');
+  assert.equal(await page.locator('tr.sel-row td[data-key="shot_name"]').textContent(), 'SQ010_0030');
+  ok('shot name on the timeline opens it in the shot tracker');
+
+  await page.click('#pane-shots .shot-toolbar button:has-text("More")');
+  await page.click('.ctx-menu button:has-text("Show / hide columns")');
+  await page.waitForSelector('.col-list');
+  assert.ok(await page.locator('.col-list label:has-text("Start")').count() && await page.locator('.col-list label:has-text("End")').count());
+  await page.keyboard.press('Escape');
+  ok('shot tracker offers Start / End columns');
 
   // security: stored markup must not run script
   await page.evaluate(() => {

@@ -8,16 +8,9 @@ import { todoStore, todoChips, openTodoPopover, renderBoard } from './todos.js';
 import { parseDelimited } from './csv.js';
 import { askSequenceName, saveSequence } from './sequences.js';
 
-export const STATUSES = [
-  { id: 'wtg', label: 'Waiting' },
-  { id: 'rdy', label: 'Ready' },
-  { id: 'ip', label: 'In progress' },
-  { id: 'shot', label: 'Shot' },
-  { id: 'rev', label: 'In review' },
-  { id: 'apr', label: 'Approved' },
-  { id: 'hld', label: 'On hold' },
-  { id: 'omt', label: 'Omitted' },
-];
+import { STATUSES } from './statuses.js';
+
+export { STATUSES };
 const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
 const SHOT_TYPES = ['EWS', 'WS', 'MWS', 'MS', 'MCU', 'CU', 'ECU', 'OTS', 'POV', 'Insert', '2-Shot', 'Aerial', 'Cutaway'];
 const MOVES = ['Static', 'Pan', 'Tilt', 'Dolly', 'Track', 'Handheld', 'Steadicam', 'Gimbal', 'Crane', 'Drone', 'Zoom', 'Push in', 'Pull out'];
@@ -43,9 +36,11 @@ const T = {
   int_ext: "INT = interior, EXT = exterior. Taken from the scene heading in the script.",
   day_night: "Time of day in the story (DAY, NIGHT, DAWN, DUSK), from the scene heading. Drives lighting and scheduling.",
   shoot_day: "The shooting-schedule date on which this shot is filmed.",
+  start_date: "Planned start of work on this shot (prep, shoot or post). Shown as a bar on the Timeline, where you can also drag it.",
+  end_date: "Planned end of work on this shot. Shown as the end of the bar on the Timeline.",
   assignee: "Main person responsible for the shot.",
   priority: "How urgent the shot is: low, normal, high, urgent.",
-  due_date: "Deadline for the shot. Shown in red when overdue and not yet approved or omitted.",
+  due_date: "Deadline for the shot. Shown in red when overdue and not yet approved or omitted, and as a flag on the Timeline.",
   comments: "Free notes: continuity, problems, director’s feedback. Shift+Enter for a new line.",
   _todo: "Open tasks for this shot per team member. The number is how many are still open; ✓ means all done. Click to add or tick off tasks.",
   updated_at: "When the shot was last changed, and by whom."
@@ -70,6 +65,8 @@ const COLUMNS = [
   { key: 'int_ext', tip: T.int_ext, label: 'I/E', type: 'select', w: 72, hidden: true, options: () => ['', 'INT', 'EXT', 'INT/EXT'].map((v) => [v, v || '—']) },
   { key: 'day_night', tip: T.day_night, label: 'D/N', type: 'select', w: 76, hidden: true, options: () => ['', 'DAY', 'NIGHT', 'DAWN', 'DUSK'].map((v) => [v, v || '—']) },
   { key: 'shoot_day', tip: T.shoot_day, label: 'Shoot day', type: 'date', w: 116, hidden: true },
+  { key: 'start_date', tip: T.start_date, label: 'Start', type: 'date', w: 110, hidden: true },
+  { key: 'end_date', tip: T.end_date, label: 'End', type: 'date', w: 110, hidden: true },
   { key: 'assignee', tip: T.assignee, label: 'Assigned', type: 'select', w: 96, options: () => [['', '—'], ...state.team.map((m) => [m.name, m.name])] },
   { key: 'priority', tip: T.priority, label: 'Priority', type: 'select', w: 84, options: () => PRIORITIES.map((p) => [p, p]) },
   { key: 'due_date', tip: T.due_date, label: 'Due', type: 'date', w: 110, hidden: true },
@@ -1013,6 +1010,7 @@ export function mountShots(root) {
   })();
 
   return {
+    async revealShot(id) { await ready; revealShot(id); },
     async reveal(code) {
       await ready;
       filter.sequence = code; filter.q = ''; searchInput.value = '';

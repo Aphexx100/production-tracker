@@ -5,6 +5,7 @@ A small web app for tracking a film production: daily call summaries and a shot 
 - **Daily summaries**: a rich text editor for the notes from each daily call. You can paste screenshots straight in. A list on the left shows every day; click a day to open its summary. The editor saves automatically.
 - **Shot tracker**: a spreadsheet-style grid with shot name, description (with images), lens, comments and per-person to-dos. It also has Shotgrid-style extras: status pipeline, frame in/out with length and timecode, handles, sequence and scene, shot size, camera and movement, location, INT/EXT, day/night, shoot day, assignee, priority and due date.
 - **References**: one container per sequence (the same codes as the "Seq" column), with files sorted into Movies, Pictures, PDFs, Links, Audio, Documents, 3D & scenes and Other. Drag files or links from your desktop or browser onto a sequence to upload them. Movies and pictures get thumbnails and open in a viewer; PDFs open in a new tab. The paperclip next to each Seq in the shot tracker jumps to its references, and "Shots" on a sequence filters the shot tracker to it.
+- **Timeline**: a Gantt chart with one row per sequence that opens into its shots. Drag bars to move them, drag their ends to change dates, or drag across an empty row to plan it. Milestones (◆) and deadlines (⚑) can belong to the whole project, a sequence or a single shot; overdue deadlines turn red and the next ones show at the top. Shoot days and shot due dates appear as markers. Zoom by days, weeks or months.
 - **To-dos** for Mihai, Miguel, Rafael, Micael and Sascha. Add them per shot, or add general ones on the "To-dos by person" board. An admin can change the team.
 
 Try the interface without any setup: run it locally (see below) and open `/?demo`. Demo data stays in your own browser only.
@@ -43,6 +44,8 @@ The Supabase URL and the anon (publishable) key are built into the public site. 
 4. Open a new query, paste the contents of [`supabase/002_references.sql`](supabase/002_references.sql) and click **Run**. This adds the References tab.
 
 5. Open a new query, paste [`supabase/003_upload_limit.sql`](supabase/003_upload_limit.sql) and click **Run**. This adds the upload size setting.
+
+6. Open a new query, paste [`supabase/004_timeline.sql`](supabase/004_timeline.sql) and click **Run**. This adds the Timeline.
 
 Existing projects only need the numbered files they have not run yet. Every file is safe to run again.
 
@@ -91,6 +94,7 @@ npm run check
 supabase/schema.sql   tables, row-level security, storage bucket, realtime
 supabase/002_references.sql   sequences + references tables, "references" bucket
 supabase/003_upload_limit.sql upload size setting
+supabase/004_timeline.sql     dates on sequences and shots, milestones and deadlines
 src/main.js           boot, sign-in gate, tabs
 src/auth.js           sign in, register, password reset, approval screen
 src/dailies.js        daily summaries: day list and editor
@@ -98,6 +102,7 @@ src/editor.js         rich text editor (TipTap) and toolbar
 src/shots.js          shot tracker grid
 src/todos.js          to-do popover and per-person board
 src/references.js     references per sequence: drag & drop upload, viewer
+src/timeline.js       timeline: sequences, shots, milestones, deadlines
 src/admin.js          users, project settings, team
 src/api/supabase.js   data access (Supabase)
 src/api/demo.js       browser-only stand-in used by ?demo and the tests

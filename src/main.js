@@ -66,6 +66,7 @@ function renderApp() {
     { id: 'dailies', label: 'Daily summaries', short: 'Dailies', icon: 'note', load: () => import('./dailies.js').then((m) => m.mountDailies) },
     { id: 'shots', label: 'Shot tracker', short: 'Shots', icon: 'film', load: () => import('./shots.js').then((m) => m.mountShots) },
     { id: 'references', label: 'References', short: 'Refs', icon: 'folder', load: () => import('./references.js').then((m) => m.mountReferences) },
+    { id: 'timeline', label: 'Timeline', short: 'Time', icon: 'calendar', load: () => import('./timeline.js').then((m) => m.mountTimeline) },
   ];
   const panes = {};
   const mounted = {};
@@ -123,9 +124,10 @@ function renderApp() {
   }
 
   // Cross-links, e.g. a sequence in the shot tracker <-> its references.
-  on('navigate', async ({ tab, sequence }) => {
+  on('navigate', async ({ tab, sequence, shot }) => {
     await show(tab);
-    if (sequence != null) mounted[tab]?.reveal?.(sequence);
+    if (shot) mounted[tab]?.revealShot?.(shot);
+    else if (sequence != null) mounted[tab]?.reveal?.(sequence);
   });
 
   // Links like #shots or #references/SQ010 switch tabs without a reload.

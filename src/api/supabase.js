@@ -126,6 +126,7 @@ export function createSupabaseApi(url, anonKey) {
     },
 
     refs: table('refs', [['created_at', true]]),
+    milestones: table('milestones', [['date', true]]),
 
     refFiles: {
       /**

@@ -4,7 +4,7 @@ import { api } from './state.js';
 
 /** True when the References migration (002_references.sql) has not been run yet. */
 export function isMissingTable(e) {
-  return e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist|bucket not found/i.test(errMsg(e));
+  return ['PGRST205', 'PGRST204', '42P01', '42703'].includes(e?.code) || /schema cache|does not exist|bucket not found/i.test(errMsg(e));
 }
 
 export const MIGRATION_HINT = 'The References tables are missing in the database. An admin must run supabase/002_references.sql once in the Supabase SQL Editor.';

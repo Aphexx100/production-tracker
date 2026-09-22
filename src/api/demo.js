@@ -17,11 +17,11 @@ function seed() {
     id: crypto.randomUUID(), sort_order: i, status: 'wtg', priority: 'normal', sequence: 'SQ010', scene: '12',
     shot_name: `SQ010_${String(i * 10).padStart(4, '0')}`, description: '', shot_type: '', lens: '', camera: '',
     movement: '', frame_in: 1001, frame_out: null, handles: 8, location: '', int_ext: '', day_night: '',
-    shoot_day: null, assignee: null, due_date: null, comments: '', ...base, ...o,
+    shoot_day: null, assignee: null, due_date: null, comments: '', start_date: null, end_date: null, ...base, ...o,
   });
   const shots = [
-    shot(1, { status: 'apr', description: '<p>Wide establishing shot of the harbour at dawn. Fog rolls in.</p>', shot_type: 'EWS', lens: '24mm Cooke S4', camera: 'Alexa 35', movement: 'Static', frame_out: 1120, location: 'Harbour', int_ext: 'EXT', day_night: 'DAWN', assignee: 'Sascha', shoot_day: day(2) }),
-    shot(2, { status: 'ip', description: '<p>Mara walks along the pier, <strong>tracking</strong> left to right.</p>', shot_type: 'MS', lens: '50mm Cooke S4', camera: 'Alexa 35', movement: 'Dolly', frame_out: 1210, location: 'Harbour', int_ext: 'EXT', day_night: 'DAWN', assignee: 'Mihai', priority: 'high', shoot_day: day(1), comments: 'Needs sky replacement' }),
+    shot(1, { status: 'apr', description: '<p>Wide establishing shot of the harbour at dawn. Fog rolls in.</p>', shot_type: 'EWS', lens: '24mm Cooke S4', camera: 'Alexa 35', movement: 'Static', frame_out: 1120, location: 'Harbour', int_ext: 'EXT', day_night: 'DAWN', assignee: 'Sascha', shoot_day: day(2), start_date: day(8), end_date: day(1) }),
+    shot(2, { status: 'ip', description: '<p>Mara walks along the pier, <strong>tracking</strong> left to right.</p>', shot_type: 'MS', lens: '50mm Cooke S4', camera: 'Alexa 35', movement: 'Dolly', frame_out: 1210, location: 'Harbour', int_ext: 'EXT', day_night: 'DAWN', assignee: 'Mihai', priority: 'high', shoot_day: day(1), comments: 'Needs sky replacement', start_date: day(3), end_date: day(-8), due_date: day(-9) }),
     shot(3, { status: 'rdy', description: '<p>Close-up on the letter in her hand.</p>', shot_type: 'ECU', lens: '100mm Macro', camera: 'Alexa 35', movement: 'Handheld', frame_out: 1060, location: 'Harbour', int_ext: 'EXT', day_night: 'DAY', assignee: 'Rafael' }),
     shot(4, { sequence: 'SQ020', scene: '14', shot_name: 'SQ020_0010', description: '<p>Interior café, over-the-shoulder.</p>', shot_type: 'OTS', lens: '35mm', frame_out: 1150, location: 'Café', int_ext: 'INT', day_night: 'NIGHT', assignee: 'Miguel', priority: 'urgent' }),
   ];
@@ -41,8 +41,13 @@ function seed() {
     ],
     media: {},
     sequences: [
-      { code: 'SQ010', title: 'Harbour at dawn', notes: '', sort_order: 1 },
-      { code: 'SQ020', title: 'Café night', notes: '', sort_order: 2 },
+      { code: 'SQ010', title: 'Harbour at dawn', notes: '', sort_order: 1, start_date: day(9), end_date: day(-12), color: null },
+      { code: 'SQ020', title: 'Café night', notes: '', sort_order: 2, start_date: day(-5), end_date: day(-26), color: null },
+    ],
+    milestones: [
+      { id: crypto.randomUUID(), title: 'Principal photography starts', kind: 'milestone', date: day(9), sequence: '', shot_id: null, notes: '', done: true, ...base },
+      { id: crypto.randomUUID(), title: 'Picture lock', kind: 'deadline', date: day(-35), sequence: '', shot_id: null, notes: 'Editor delivers locked cut', done: false, ...base },
+      { id: crypto.randomUUID(), title: 'SQ010 VFX turnover', kind: 'deadline', date: day(-14), sequence: 'SQ010', shot_id: null, notes: '', done: false, ...base },
     ],
     refs: [
       { id: crypto.randomUUID(), sequence: 'SQ010', kind: 'link', title: 'Location scout: harbour', notes: 'Low tide around 6am', url: 'https://example.com/harbour-scout', storage_path: null, thumb_path: null, file_name: null, mime: null, size_bytes: null, ...base },
@@ -64,6 +69,7 @@ export function createDemoApi() {
   let db = lsGet(KEY, null) || seed();
   db.sequences ||= [];
   db.refs ||= [];
+  db.milestones ||= [];
   const save = () => lsSet(KEY, db);
   const blobUrls = new Map();
   const sessionFiles = new Map();
@@ -92,21 +98,27 @@ export function createDemoApi() {
       const next = { ...r, ...patch };
       if (name === 'shots' && next.frame_in != null && next.frame_out != null && next.frame_out < next.frame_in)
         throw new Error('violates check constraint "frames_order"');
+      if (next.start_date && next.end_date && next.end_date < next.start_date)
+        throw new Error('violates check constraint "shot_dates"');
       Object.assign(r, patch, { updated_at: new Date().toISOString(), updated_by: ME.id });
       save();
       return clone(computed(name, r));
     },
     remove: async (id) => {
       db[name] = db[name].filter((r) => r.id !== id);
-      if (name === 'shots') db.todos = db.todos.filter((t) => t.shot_id !== id);
+      if (name === 'shots') {
+        db.todos = db.todos.filter((t) => t.shot_id !== id);
+        db.milestones = db.milestones.filter((m) => m.shot_id !== id);
+      }
       save();
     },
   });
 
   function defaults(name) {
-    if (name === 'shots') return { sort_order: 0, status: 'wtg', priority: 'normal', sequence: '', scene: '', shot_name: '', description: '', shot_type: '', lens: '', camera: '', movement: '', frame_in: null, frame_out: null, handles: 0, location: '', int_ext: '', day_night: '', shoot_day: null, assignee: null, due_date: null, comments: '' };
+    if (name === 'shots') return { sort_order: 0, status: 'wtg', priority: 'normal', sequence: '', scene: '', shot_name: '', description: '', shot_type: '', lens: '', camera: '', movement: '', frame_in: null, frame_out: null, handles: 0, location: '', int_ext: '', day_night: '', shoot_day: null, assignee: null, due_date: null, comments: '', start_date: null, end_date: null };
     if (name === 'dailies') return { title: '', content: '' };
     if (name === 'todos') return { done: false, shot_id: null };
+    if (name === 'milestones') return { kind: 'milestone', sequence: '', shot_id: null, notes: '', done: false };
     if (name === 'refs') return { sequence: '', title: '', notes: '', url: null, storage_path: null, thumb_path: null, file_name: null, mime: null, size_bytes: null };
     return {};
   }
@@ -168,11 +180,13 @@ export function createDemoApi() {
       upsert: async (row) => {
         const i = db.sequences.findIndex((x) => x.code === row.code);
         const next = { title: '', notes: '', sort_order: 0, ...(i >= 0 ? db.sequences[i] : {}), ...row };
+        if (next.start_date && next.end_date && next.end_date < next.start_date) throw new Error('violates check constraint "sequence_dates"');
         if (i >= 0) db.sequences[i] = next; else db.sequences.push(next);
         save(); return clone(next);
       },
       remove: async (code) => { db.sequences = db.sequences.filter((x) => x.code !== code); save(); },
     },
+    milestones: table('milestones', (a, b) => a.date.localeCompare(b.date)),
     refs: table('refs', (a, b) => a.created_at.localeCompare(b.created_at)),
     // Small files persist in localStorage; big ones (movies) only live until reload.
     refFiles: {
