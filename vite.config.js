@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => {
     `script-src 'self'${dev ? " 'unsafe-inline'" : ''}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' https: data: blob:",
+    `media-src 'self' blob: ${sb}`.trim(),
     `connect-src 'self' ${sb} ${ws}${dev ? ' ws: http://localhost:*' : ''}`.trim(),
     "font-src 'self'",
     "object-src 'none'",

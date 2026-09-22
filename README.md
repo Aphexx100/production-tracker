@@ -4,6 +4,7 @@ A small web app for tracking a film production: daily call summaries and a shot 
 
 - **Daily summaries**: a rich text editor for the notes from each daily call. You can paste screenshots straight in. A list on the left shows every day; click a day to open its summary. The editor saves automatically.
 - **Shot tracker**: a spreadsheet-style grid with shot name, description (with images), lens, comments and per-person to-dos. It also has Shotgrid-style extras: status pipeline, frame in/out with length and timecode, handles, sequence and scene, shot size, camera and movement, location, INT/EXT, day/night, shoot day, assignee, priority and due date.
+- **References**: one container per sequence (the same codes as the "Seq" column), with files sorted into Movies, Pictures, PDFs, Links, Audio, Documents, 3D & scenes and Other. Drag files or links from your desktop or browser onto a sequence to upload them. Movies and pictures get thumbnails and open in a viewer; PDFs open in a new tab. The paperclip next to each Seq in the shot tracker jumps to its references, and "Shots" on a sequence filters the shot tracker to it.
 - **To-dos** for Mihai, Miguel, Rafael, Micael and Sascha. Add them per shot, or add general ones on the "To-dos by person" board. An admin can change the team.
 
 Try the interface without any setup: run it locally (see below) and open `/?demo`. Demo data stays in your own browser only.
@@ -26,7 +27,7 @@ Try the interface without any setup: run it locally (see below) and open `/?demo
 - Supabase Auth handles passwords. It stores bcrypt hashes only, never the passwords. The app requires at least 10 characters and rejects common passwords.
 - Anyone can register, but a new account sees **nothing**. An admin must approve it first, and the email address must be confirmed.
 - Row-level security on every table enforces this in the database itself, so the rule also holds for someone who calls the API directly. The `anon` role has no table access at all.
-- Images go to a private storage bucket. The app shows them through signed URLs that expire.
+- Images and reference files go to private storage buckets. The app shows them through signed URLs that expire. Only the uploader or an admin can delete a reference.
 - Stored rich text is sanitized with DOMPurify before display. A strict Content-Security-Policy blocks inline and third-party scripts.
 - `tests/schema.test.mjs` runs the real schema in an in-process Postgres and checks these rules as different users.
 
@@ -39,6 +40,11 @@ The Supabase URL and the anon (publishable) key are built into the public site. 
 1. Create a free account at [supabase.com](https://supabase.com) and create a new project. Pick a region close to the team and save the database password somewhere safe.
 2. Open **SQL Editor > New query**. Paste the full contents of [`supabase/schema.sql`](supabase/schema.sql).
 3. In the pasted SQL, replace `ADMIN_EMAIL_HERE` with the email address of the first admin. Then click **Run**.
+4. Open a new query, paste the contents of [`supabase/002_references.sql`](supabase/002_references.sql) and click **Run**. This adds the References tab.
+
+Projects set up before the References tab existed only need step 4.
+
+**Upload size:** Supabase limits the size of each uploaded file for the whole project (50 MB on the free plan). To allow bigger movies, raise it under **Storage > Settings** (paid plans allow up to 500 GB per file).
 
 ### 2. Configure authentication
 
@@ -49,7 +55,7 @@ In **Authentication**:
 
 ### 3. Connect the GitHub site
 
-1. In Supabase, open **Project Settings > API** (or **API Keys**). Copy the **Project URL** and the **anon** or **publishable** key.
+1. In Supabase, copy the **Project URL** (**Project Settings > Data API**, or `https://<project-id>.supabase.co` where the id is in the dashboard address) and the **anon** or **publishable** key (**Project Settings > API Keys**).
 2. In this GitHub repository, open **Settings > Secrets and variables > Actions > Variables**. Add these two repository variables:
    - `SUPABASE_URL`: the project URL
    - `SUPABASE_ANON_KEY`: the anon or publishable key
@@ -81,12 +87,14 @@ npm run check
 
 ```
 supabase/schema.sql   tables, row-level security, storage bucket, realtime
+supabase/002_references.sql   sequences + references tables, "references" bucket
 src/main.js           boot, sign-in gate, tabs
 src/auth.js           sign in, register, password reset, approval screen
 src/dailies.js        daily summaries: day list and editor
 src/editor.js         rich text editor (TipTap) and toolbar
 src/shots.js          shot tracker grid
 src/todos.js          to-do popover and per-person board
+src/references.js     references per sequence: drag & drop upload, viewer
 src/admin.js          users, project settings, team
 src/api/supabase.js   data access (Supabase)
 src/api/demo.js       browser-only stand-in used by ?demo and the tests

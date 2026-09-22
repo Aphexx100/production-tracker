@@ -40,6 +40,12 @@ const P = {
   note: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
   x: 'M6 6l12 12M18 6L6 18',
+  audio: 'M9 18V6l10-2v12M9 18a3 3 0 11-6 0 3 3 0 016 0zM19 16a3 3 0 11-6 0 3 3 0 016 0z',
+  doc: 'M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h5',
+  cube: 'M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5',
+  file: 'M6 3h9l4 4v14H6zM14 3v5h5',
+  folder: 'M3 6h6l2 2h10v11H3z',
+  paperclip: 'M20 11l-8.5 8.5a5 5 0 01-7-7L13 4a3.5 3.5 0 015 5l-8.5 8.5a2 2 0 01-3-3L14 7',
 };
 
 export function icon(name, size = 18) {

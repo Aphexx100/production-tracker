@@ -23,7 +23,7 @@ await db.exec(`
   create table storage.buckets (id text primary key, name text, public boolean,
     file_size_limit bigint, allowed_mime_types text[]);
   create table storage.objects (id uuid primary key default gen_random_uuid(),
-    bucket_id text, name text);
+    bucket_id text, name text, owner_id text default auth.uid()::text);
   alter table storage.objects enable row level security;
   create publication supabase_realtime;
   grant usage on schema public, storage to authenticated, anon;
@@ -33,8 +33,11 @@ await db.exec(`
 
 const sql = readFileSync(new URL('../supabase/schema.sql', import.meta.url), 'utf8')
   .replaceAll('ADMIN_EMAIL_HERE', 'boss@example.com');
+const refsSql = readFileSync(new URL('../supabase/002_references.sql', import.meta.url), 'utf8');
 await db.exec(sql);
+await db.exec(refsSql);
 await db.exec(sql); // idempotent
+await db.exec(refsSql);
 
 const ADMIN = '00000000-0000-0000-0000-00000000000a';
 const MEMBER = '00000000-0000-0000-0000-00000000000b';
@@ -127,5 +130,34 @@ ok('storage bucket private, delete admin-only');
 await as(MEMBER, `delete from public.shots where id = '${shotId}'`);
 r = await db.query('select count(*)::int n from public.todos'); assert.equal(r.rows[0].n, 0);
 ok('deleting a shot removes its todos');
+
+// references
+const PENDING = '00000000-0000-0000-0000-00000000000d';
+await db.exec(`insert into auth.users (id, email, email_confirmed_at) values ('${PENDING}', 'new@example.com', now())`);
+await as(MEMBER, `insert into public.sequences (code, title) values ('SQ010', 'Harbour chase')`);
+await as(MEMBER, `insert into public.refs (sequence, kind, title, storage_path, file_name) values ('SQ010', 'video', 'Moodreel', 'a/b.mp4', 'b.mp4')`);
+await as(ADMIN, `insert into public.refs (sequence, kind, title, url) values ('SQ010', 'link', 'Location scout', 'https://example.com/x')`);
+await fails(MEMBER, `insert into public.refs (kind, url) values ('link', 'javascript:alert(1)')`);
+await fails(MEMBER, `insert into public.refs (kind, title) values ('video', 'no file')`);
+await fails(MEMBER, `insert into public.refs (kind, storage_path) values ('exe', 'x')`);
+r = await as(PENDING, 'select * from public.refs'); assert.equal(r.rows.length, 0);
+r = await as(null, 'select 1').catch(() => ({ rows: [] }));
+await fails(null, 'select * from public.refs');
+ok('refs: sequence containers, links need http(s), files need a path, pending users see nothing');
+
+r = await as(MEMBER, `delete from public.refs where kind = 'link' returning 1`); assert.equal(r.rows.length, 0);
+r = await as(MEMBER, `delete from public.refs where kind = 'video' returning 1`); assert.equal(r.rows.length, 1);
+r = await as(ADMIN, `delete from public.refs where kind = 'link' returning 1`); assert.equal(r.rows.length, 1);
+ok('refs: only uploader or admin can delete');
+
+await as(MEMBER, `insert into storage.objects (bucket_id, name) values ('references', 'm.mp4')`);
+await as(ADMIN, `insert into storage.objects (bucket_id, name) values ('references', 'a.mp4')`);
+r = await as(PENDING, `select * from storage.objects where bucket_id = 'references'`); assert.equal(r.rows.length, 0);
+await fails(PENDING, `insert into storage.objects (bucket_id, name) values ('references', 'p.mp4')`);
+r = await as(MEMBER, `delete from storage.objects where name = 'a.mp4' returning 1`); assert.equal(r.rows.length, 0);
+r = await as(MEMBER, `delete from storage.objects where name = 'm.mp4' returning 1`); assert.equal(r.rows.length, 1);
+r = await as(ADMIN, `delete from storage.objects where name = 'a.mp4' returning 1`); assert.equal(r.rows.length, 1);
+r = await db.query(`select public from storage.buckets where id = 'references'`); assert.equal(r.rows[0].public, false);
+ok('references bucket: private, upload by approved users, delete by owner or admin');
 
 console.log(`schema: ${passed} checks passed`);

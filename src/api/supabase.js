@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 const BUCKET = 'media';
+const REF_BUCKET = 'references';
 const SIGN_SECONDS = 60 * 60 * 6;
 
 export function createSupabaseApi(url, anonKey) {
@@ -27,6 +28,22 @@ export function createSupabaseApi(url, anonKey) {
   });
 
   const signCache = new Map();
+  const refSignCache = new Map();
+
+  async function signMany(bucket, cache, paths) {
+    const now = Date.now();
+    const missing = [...new Set(paths)].filter((p) => {
+      const c = cache.get(p);
+      return !c || c.exp < now + 60_000;
+    });
+    if (missing.length) {
+      const data = unwrap(await sb.storage.from(bucket).createSignedUrls(missing, SIGN_SECONDS));
+      for (const r of data) {
+        if (r.signedUrl) cache.set(r.path, { url: r.signedUrl, exp: now + SIGN_SECONDS * 1000 });
+      }
+    }
+    return Object.fromEntries(paths.map((p) => [p, cache.get(p)?.url || '']));
+  }
 
   return {
     mode: 'supabase',
@@ -99,19 +116,55 @@ export function createSupabaseApi(url, anonKey) {
         return path;
       },
       /** Resolve many storage paths to short-lived signed URLs. */
-      async urls(paths) {
-        const now = Date.now();
-        const missing = [...new Set(paths)].filter((p) => {
-          const c = signCache.get(p);
-          return !c || c.exp < now + 60_000;
+      urls: (paths) => signMany(BUCKET, signCache, paths),
+    },
+
+    sequences: {
+      list: async () => unwrap(await sb.from('sequences').select('*').order('sort_order').order('code')),
+      upsert: async (row) => unwrap(await sb.from('sequences').upsert(row, { onConflict: 'code' }).select().single()),
+      remove: async (code) => { unwrap(await sb.from('sequences').delete().eq('code', code)); },
+    },
+
+    refs: table('refs', [['created_at', true]]),
+
+    refFiles: {
+      /**
+       * Upload with progress. Plain XHR against the Storage REST API, because
+       * supabase-js has no progress events. Returns the storage path.
+       */
+      async upload(blob, ext, onProgress) {
+        const { data: { session } } = await sb.auth.getSession();
+        if (!session) throw new Error('Not signed in');
+        const path = `${new Date().getFullYear()}/${crypto.randomUUID()}${ext ? `.${ext}` : ''}`;
+        await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', `${url}/storage/v1/object/${REF_BUCKET}/${path}`);
+          xhr.setRequestHeader('Authorization', `Bearer ${session.access_token}`);
+          xhr.setRequestHeader('apikey', anonKey);
+          xhr.setRequestHeader('x-upsert', 'false');
+          xhr.setRequestHeader('Content-Type', blob.type || 'application/octet-stream');
+          xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) { resolve(); return; }
+            let msg = `Upload failed (${xhr.status})`;
+            try { const j = JSON.parse(xhr.responseText); msg = j.message || j.error || msg; } catch { /* not JSON */ }
+            if (xhr.status === 413 || /maximum allowed size|too large/i.test(msg)) msg = 'File is larger than the project upload limit (Supabase > Storage > Settings)';
+            reject(new Error(msg));
+          };
+          xhr.onerror = () => reject(new Error('Network error during upload'));
+          xhr.send(blob);
         });
-        if (missing.length) {
-          const data = unwrap(await sb.storage.from(BUCKET).createSignedUrls(missing, SIGN_SECONDS));
-          for (const r of data) {
-            if (r.signedUrl) signCache.set(r.path, { url: r.signedUrl, exp: now + SIGN_SECONDS * 1000 });
-          }
-        }
-        return Object.fromEntries(paths.map((p) => [p, signCache.get(p)?.url || '']));
+        return path;
+      },
+      urls: (paths) => signMany(REF_BUCKET, refSignCache, paths),
+      async downloadUrl(path, fileName) {
+        const { data, error } = await sb.storage.from(REF_BUCKET).createSignedUrl(path, 300, { download: fileName || true });
+        if (error) throw error;
+        return data.signedUrl;
+      },
+      async remove(paths) {
+        const list = paths.filter(Boolean);
+        if (list.length) unwrap(await sb.storage.from(REF_BUCKET).remove(list));
       },
     },
 

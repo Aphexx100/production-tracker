@@ -168,6 +168,94 @@ try {
   assert.equal(await cell(0, 'lens').textContent(), '85mm Master Prime');
   ok('shot edits persist across reload');
 
+  // ---- references ----
+  await page.click('#tab-references');
+  await page.waitForSelector('section.seq[data-seq="SQ010"]');
+  assert.deepEqual(await page.$$eval('section.seq', (els) => els.map((e) => e.dataset.seq)), ['SQ010', 'SQ020', '']);
+  const seq = (code) => page.locator(`section.seq[data-seq="${code}"]`);
+  assert.equal(await seq('SQ010').locator('.ref-card').count(), 1);
+  ok('references grouped in sequence containers (from shots + sequences)');
+
+  async function dropOn(code, files, uri) {
+    await page.evaluate(async ({ code, files, uri }) => {
+      const dt = new DataTransfer();
+      for (const f of files) {
+        let blob;
+        if (f.type === 'image/png') {
+          const c = document.createElement('canvas'); c.width = 64; c.height = 36;
+          c.getContext('2d').fillStyle = '#3af'; c.getContext('2d').fillRect(0, 0, 64, 36);
+          blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+        } else blob = new Blob([new Uint8Array(2048)], { type: f.type });
+        dt.items.add(new File([blob], f.name, { type: f.type }));
+      }
+      if (uri) dt.setData('text/uri-list', uri);
+      const el = document.querySelector(`section.seq[data-seq="${code}"]`);
+      for (const type of ['dragenter', 'dragover', 'drop']) el.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+    }, { code, files, uri });
+  }
+
+  await dropOn('SQ010', [{ name: 'mood.png', type: 'image/png' }, { name: 'script pages.pdf', type: 'application/pdf' }, { name: 'previs.mp4', type: 'video/mp4' }]);
+  await page.waitForFunction(() => document.querySelectorAll('section.seq[data-seq="SQ010"] .ref-card').length === 4, null, { timeout: 20000 });
+  const groups = await seq('SQ010').locator('.kind-title').allTextContents();
+  assert.deepEqual(groups.map((g) => g.replace(/\s*\d+$/, '')), ['Movies', 'Pictures', 'PDFs', 'Links']);
+  await page.waitForSelector('section.seq[data-seq="SQ010"] .kind-group:has-text("Pictures") img[src^="blob:"]');
+  ok('drag & drop upload sorts files into Movies / Pictures / PDFs with thumbnails');
+
+  await dropOn('SQ020', [], 'https://vimeo.com/123456');
+  await page.waitForFunction(() => document.querySelector('section.seq[data-seq="SQ020"]').textContent.includes('vimeo.com/123456'));
+  ok('dropping a web link adds it to Links');
+
+  await seq('SQ010').locator('.ref-card', { hasText: 'mood' }).click();
+  await page.waitForSelector('.viewer-stage img[src^="blob:"]');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.viewer-stage', { state: 'detached' });
+  ok('picture opens in the viewer');
+
+  await page.click('.kind-chip:has-text("PDFs")');
+  assert.equal(await seq('SQ010').locator('.ref-card').count(), 1);
+  await page.click('.kind-filter .link-btn');
+  assert.equal(await seq('SQ010').locator('.ref-card').count(), 4);
+  ok('file type filter');
+
+  const pdfCard = seq('SQ010').locator('.ref-card', { hasText: 'script pages' });
+  await pdfCard.hover();
+  await pdfCard.locator('.ref-menu').click();
+  await page.click('.ctx-menu button:has-text("Edit / move")');
+  await page.selectOption('.modal select', 'SQ020');
+  await page.click('.modal button:has-text("Save")');
+  await page.waitForFunction(() => document.querySelector('section.seq[data-seq="SQ020"]').textContent.includes('script pages'));
+  ok('move a reference to another sequence');
+
+  const vid = seq('SQ010').locator('.ref-card', { hasText: 'previs' });
+  await vid.hover();
+  await vid.locator('.ref-menu').click();
+  await page.click('.ctx-menu button:has-text("Delete")');
+  await page.click('.modal button.danger');
+  await page.waitForFunction(() => document.querySelectorAll('section.seq[data-seq="SQ010"] .ref-card').length === 2);
+  ok('delete a reference');
+
+  await page.reload();
+  await page.waitForSelector('section.seq[data-seq="SQ010"] .ref-card');
+  assert.equal(await seq('SQ010').locator('.ref-card').count(), 2);
+  ok('references persist across reload');
+
+  // cross-links between shot tracker and references
+  await seq('SQ020').locator('button:has-text("Shots")').click();
+  await page.waitForSelector('#pane-shots:not([hidden]) tr.shot-row');
+  assert.deepEqual([...new Set(await page.locator('tr.shot-row td[data-key="sequence"] > span').allTextContents())], ['SQ020']);
+  assert.equal(await page.locator('tr.shot-row').count(), 3); // SQ020_0010 + two added earlier
+  assert.match(await page.textContent('.seq-filter'), /SQ020/);
+  await page.click('.seq-filter');
+  await page.waitForFunction(() => document.querySelectorAll('tr.shot-row').length === 6);
+  ok('"Shots" on a sequence filters the shot tracker to it');
+
+  const clip = page.locator('tr.shot-row').first().locator('.seq-ref');
+  assert.equal((await clip.textContent()).trim(), '2');
+  await clip.click();
+  await page.waitForSelector('#pane-references:not([hidden]) section.seq.flash[data-seq="SQ010"]');
+  assert.match(page.url(), /#references\/SQ010$/);
+  ok('paperclip in the Seq column jumps to that sequence’s references');
+
   // security: stored markup must not run script
   await page.evaluate(() => {
     const db = JSON.parse(localStorage.getItem('pt-demo-db-v1'));
@@ -175,6 +263,7 @@ try {
     db.dailies[0].content = '<img src=x onerror="window.__xss=3"><p>x</p>';
     localStorage.setItem('pt-demo-db-v1', JSON.stringify(db));
   });
+  await page.goto(`${URL_}#shots`);
   await page.reload();
   await page.waitForSelector('tr.shot-row');
   await page.fill('.search', 'evil');

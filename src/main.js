@@ -1,7 +1,7 @@
 import './style.css';
 import { h, toast, errMsg } from './util.js';
 import { icon } from './icons.js';
-import { state, api, on, isAdmin } from './state.js';
+import { state, api, on, emit as emit_, isAdmin } from './state.js';
 import { renderAuth, renderPending, renderSetup } from './auth.js';
 
 const root = document.getElementById('app');
@@ -65,6 +65,7 @@ function renderApp() {
   const tabs = [
     { id: 'dailies', label: 'Daily summaries', short: 'Dailies', icon: 'note', load: () => import('./dailies.js').then((m) => m.mountDailies) },
     { id: 'shots', label: 'Shot tracker', short: 'Shots', icon: 'film', load: () => import('./shots.js').then((m) => m.mountShots) },
+    { id: 'references', label: 'References', short: 'Refs', icon: 'folder', load: () => import('./references.js').then((m) => m.mountReferences) },
   ];
   const panes = {};
   const mounted = {};
@@ -121,7 +122,22 @@ function renderApp() {
     mounted[id].enter?.();
   }
 
-  show(location.hash.startsWith('#shots') ? 'shots' : 'dailies');
+  // Cross-links, e.g. a sequence in the shot tracker <-> its references.
+  on('navigate', async ({ tab, sequence }) => {
+    await show(tab);
+    if (sequence != null) mounted[tab]?.reveal?.(sequence);
+  });
+
+  // Links like #shots or #references/SQ010 switch tabs without a reload.
+  window.addEventListener('hashchange', () => {
+    const t = tabs.find((x) => location.hash.startsWith(`#${x.id}`));
+    if (!t) return;
+    const seq = t.id === 'references' && location.hash.match(/^#references\/(.+)$/);
+    if (seq) emit_('navigate', { tab: t.id, sequence: decodeURIComponent(seq[1]) }); else show(t.id);
+  });
+
+  const start_ = tabs.find((t) => location.hash.startsWith(`#${t.id}`))?.id || 'dailies';
+  show(start_);
 }
 
 init().catch((e) => {

@@ -40,6 +40,14 @@ function seed() {
       { id: crypto.randomUUID(), shot_id: null, person: 'Sascha', body: 'Book fog machine for Thursday', done: false, ...base },
     ],
     media: {},
+    sequences: [
+      { code: 'SQ010', title: 'Harbour at dawn', notes: '', sort_order: 1 },
+      { code: 'SQ020', title: 'Café night', notes: '', sort_order: 2 },
+    ],
+    refs: [
+      { id: crypto.randomUUID(), sequence: 'SQ010', kind: 'link', title: 'Location scout: harbour', notes: 'Low tide around 6am', url: 'https://example.com/harbour-scout', storage_path: null, thumb_path: null, file_name: null, mime: null, size_bytes: null, ...base },
+      { id: crypto.randomUUID(), sequence: 'SQ020', kind: 'link', title: 'Lighting reference', notes: '', url: 'https://example.com/cafe-lighting', storage_path: null, thumb_path: null, file_name: null, mime: null, size_bytes: null, ...base },
+    ],
   };
 }
 
@@ -54,8 +62,11 @@ function dataUrlToBlob(url) {
 
 export function createDemoApi() {
   let db = lsGet(KEY, null) || seed();
+  db.sequences ||= [];
+  db.refs ||= [];
   const save = () => lsSet(KEY, db);
   const blobUrls = new Map();
+  const sessionFiles = new Map();
   save();
 
   const computed = (name, row) =>
@@ -96,6 +107,7 @@ export function createDemoApi() {
     if (name === 'shots') return { sort_order: 0, status: 'wtg', priority: 'normal', sequence: '', scene: '', shot_name: '', description: '', shot_type: '', lens: '', camera: '', movement: '', frame_in: null, frame_out: null, handles: 0, location: '', int_ext: '', day_night: '', shoot_day: null, assignee: null, due_date: null, comments: '' };
     if (name === 'dailies') return { title: '', content: '' };
     if (name === 'todos') return { done: false, shot_id: null };
+    if (name === 'refs') return { sequence: '', title: '', notes: '', url: null, storage_path: null, thumb_path: null, file_name: null, mime: null, size_bytes: null };
     return {};
   }
 
@@ -150,6 +162,45 @@ export function createDemoApi() {
         }
         return out;
       },
+    },
+    sequences: {
+      list: async () => clone([...db.sequences].sort((a, b) => a.sort_order - b.sort_order || a.code.localeCompare(b.code))),
+      upsert: async (row) => {
+        const i = db.sequences.findIndex((x) => x.code === row.code);
+        const next = { title: '', notes: '', sort_order: 0, ...(i >= 0 ? db.sequences[i] : {}), ...row };
+        if (i >= 0) db.sequences[i] = next; else db.sequences.push(next);
+        save(); return clone(next);
+      },
+      remove: async (code) => { db.sequences = db.sequences.filter((x) => x.code !== code); save(); },
+    },
+    refs: table('refs', (a, b) => a.created_at.localeCompare(b.created_at)),
+    // Small files persist in localStorage; big ones (movies) only live until reload.
+    refFiles: {
+      async upload(blob, ext, onProgress) {
+        const path = `demo-ref/${crypto.randomUUID()}${ext ? `.${ext}` : ''}`;
+        for (const f of [0.25, 0.5, 0.75]) { onProgress?.(f); await new Promise((r) => setTimeout(r, 40)); }
+        if (blob.size < 1_500_000) {
+          db.media[path] = await new Promise((res, rej) => {
+            const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob);
+          });
+          save();
+        } else sessionFiles.set(path, blob);
+        onProgress?.(1);
+        return path;
+      },
+      async urls(paths) {
+        const out = {};
+        for (const p of paths) {
+          if (!blobUrls.has(p)) {
+            if (sessionFiles.has(p)) blobUrls.set(p, URL.createObjectURL(sessionFiles.get(p)));
+            else if (db.media[p]) blobUrls.set(p, URL.createObjectURL(dataUrlToBlob(db.media[p])));
+          }
+          out[p] = blobUrls.get(p) || '';
+        }
+        return out;
+      },
+      async downloadUrl(path) { return (await this.urls([path]))[path]; },
+      async remove(paths) { for (const p of paths) { delete db.media[p]; sessionFiles.delete(p); } save(); },
     },
     subscribe: () => () => {},
   };

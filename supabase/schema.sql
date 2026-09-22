@@ -348,3 +348,8 @@ begin
   end loop;
 end;
 $$;
+
+-- ---------------------------------------------------------------------
+-- More tables live in numbered files next to this one. Run them after
+-- this file, in order: 002_references.sql (References tab).
+-- ---------------------------------------------------------------------

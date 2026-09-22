@@ -1,6 +1,6 @@
 import { h, $, $$, toast, errMsg, framesToTC, htmlToText, lsGet, lsSet, fmtDay, fmtTime, confirmDialog, csvEscape, download, todayISO } from './util.js';
 import { icon } from './icons.js';
-import { api, state, on, profileName } from './state.js';
+import { api, state, on, emit, profileName } from './state.js';
 import { sanitize } from './sanitize.js';
 import { createEditor } from './editor.js';
 import { resolveImages, resolveHtml, stripImageUrls, uploadImage, imageFiles } from './media.js';
@@ -27,7 +27,7 @@ const statusLabel = (id) => STATUSES.find((s) => s.id === id)?.label || id;
 const T = {
   status: "Where the shot is in the pipeline: Waiting (not ready), Ready (prepped to shoot), In progress, Shot (filmed), In review (with the director or VFX supervisor), Approved (final), On hold, Omitted (cut from the film).",
   shot_name: "Unique shot code, usually sequence + shot number, e.g. SQ010_0020. Numbers go up in steps of 10 so new shots can be slotted in between (0015).",
-  sequence: "Sequence: a group of scenes that form one continuous story beat, e.g. SQ010 = “the harbour chase”. One sequence contains one or more scenes.",
+  sequence: "Sequence: a group of scenes that form one continuous story beat, e.g. SQ010 = “the harbour chase”. One sequence contains one or more scenes. The paperclip opens this sequence's references.",
   scene: "Scene number from the script: the action in one location at one time. A scene is covered by one or more shots.",
   description: "What happens in the shot: action, framing, dialogue cues. Paste storyboards or reference images here.",
   shot_type: "Shot size, i.e. how much of the subject is in frame: EWS extreme wide, WS wide, MWS medium wide, MS medium, MCU medium close-up, CU close-up, ECU extreme close-up, OTS over-the-shoulder, POV point of view, Insert = detail of an object.",
@@ -54,7 +54,7 @@ const T = {
 const COLUMNS = [
   { key: 'status', tip: T.status, label: 'Status', type: 'select', w: 116, options: () => STATUSES.map((s) => [s.id, s.label]) },
   { key: 'shot_name', tip: T.shot_name, label: 'Shot', type: 'text', w: 130 },
-  { key: 'sequence', tip: T.sequence, label: 'Seq', type: 'text', w: 76 },
+  { key: 'sequence', tip: T.sequence, label: 'Seq', type: 'text', w: 104 },
   { key: 'scene', tip: T.scene, label: 'Scene', type: 'text', w: 62 },
   { key: 'description', tip: T.description, label: 'Description', type: 'rich', w: 320 },
   { key: 'shot_type', tip: T.shot_type, label: 'Size', type: 'text', w: 70, suggest: SHOT_TYPES },
@@ -87,7 +87,7 @@ export function mountShots(root) {
   const widths = prefs.widths || {};
   let sort = prefs.sort || null; // {key, dir}
   let groupBySeq = prefs.group ?? false;
-  const filter = { q: '', statuses: new Set(prefs.statuses || []), assignee: prefs.assignee || '', hideOmitted: prefs.hideOmitted ?? false };
+  const filter = { q: '', sequence: null, statuses: new Set(prefs.statuses || []), assignee: prefs.assignee || '', hideOmitted: prefs.hideOmitted ?? false };
   let sel = null; // {id, key}
   let editing = null; // {id, key, close()}
   const deferred = new Set(); // rows changed remotely while being edited
@@ -138,6 +138,10 @@ export function mountShots(root) {
         });
         return b;
       }),
+      filter.sequence != null ? h('button.seq-filter', {
+        type: 'button', title: 'Showing one sequence. Click to show all.',
+        on: { click: () => { filter.sequence = null; renderChrome(); renderBody(); } },
+      }, `Seq ${filter.sequence || '(none)'}`, icon('x', 12)) : null,
       filter.statuses.size ? h('button.link-btn', { type: 'button', on: { click: () => { filter.statuses.clear(); savePrefs(); renderChrome(); renderBody(); } } }, 'Clear') : null,
       h('label.check', h('input', { type: 'checkbox', checked: filter.hideOmitted, on: { change: (e) => { filter.hideOmitted = e.target.checked; savePrefs(); renderBody(); } } }), 'Hide omitted'),
       h('label.check', h('input', { type: 'checkbox', checked: groupBySeq, on: { change: (e) => { groupBySeq = e.target.checked; savePrefs(); renderBody(); } } }), 'Group by sequence'),
@@ -159,7 +163,7 @@ export function mountShots(root) {
   }
 
   function revealShot(id) {
-    filter.q = ''; searchInput.value = ''; filter.statuses.clear(); filter.assignee = ''; filter.hideOmitted = false;
+    filter.q = ''; searchInput.value = ''; filter.sequence = null; filter.statuses.clear(); filter.assignee = ''; filter.hideOmitted = false;
     setView('grid');
     select(id, 'shot_name');
   }
@@ -170,6 +174,7 @@ export function mountShots(root) {
     let list = shots.filter((s) =>
       (!filter.statuses.size || filter.statuses.has(s.status)) &&
       (!filter.assignee || s.assignee === filter.assignee) &&
+      (filter.sequence == null || (s.sequence || '') === filter.sequence) &&
       (!filter.hideOmitted || s.status !== 'omt') &&
       (!q || searchText(s).includes(q)));
     if (sort) {
@@ -339,6 +344,16 @@ export function mountShots(root) {
     applyPin(td, c.key);
     const v = s[c.key];
     switch (c.type) {
+      case 'text':
+        if (c.key === 'sequence' && v) {
+          const n = refCounts.get(v) || 0;
+          td.append(h('span', v), h('button.seq-ref', {
+            type: 'button', dataset: { seq: v },
+            title: n ? `${n} reference${n === 1 ? '' : 's'} for ${v}. Open in References.` : `No references for ${v} yet. Open in References to add some.`,
+            'aria-label': `References for ${v}`,
+          }, icon('paperclip', 12), n ? String(n) : ''));
+        } else td.textContent = v ?? '';
+        break;
       case 'select':
         if (c.key === 'status') td.append(h(`span.status.st-${v}`, statusLabel(v)));
         else if (c.key === 'priority') td.append(h(`span.prio.p-${v}`, v));
@@ -440,7 +455,7 @@ export function mountShots(root) {
 
   table.addEventListener('mousedown', (e) => {
     const td = e.target.closest('td[data-key]');
-    if (!td || e.target.closest('a')) return;
+    if (!td || e.target.closest('a, .seq-ref')) return;
     const id = td.parentElement.dataset.id;
     const key = td.dataset.key;
     if (editing && editing.id === id && editing.key === key) return;
@@ -926,6 +941,23 @@ export function mountShots(root) {
       if (view === 'grid' && !editing) renderBody();
     }
   });
+  // Reference counts per sequence, shown as a paperclip in the Seq column.
+  let refCounts = new Map();
+  const countRefs = (rows) => {
+    refCounts = new Map();
+    for (const r of rows) if (r.sequence) refCounts.set(r.sequence, (refCounts.get(r.sequence) || 0) + 1);
+  };
+  let refRows = [];
+  const unsubRefs = api().subscribe('refs', (type, row, old) => {
+    refRows = type === 'DELETE' ? refRows.filter((r) => r.id !== old.id) : [...refRows.filter((r) => r.id !== row.id), row];
+    countRefs(refRows);
+    if (view === 'grid' && !editing) renderBody();
+  });
+  table.addEventListener('click', (e) => {
+    const b = e.target.closest('.seq-ref');
+    if (b) { e.stopPropagation(); emit('navigate', { tab: 'references', sequence: b.dataset.seq }); }
+  }, true);
+
   const unsubTodos = api().subscribe('todos', (type, row, old) => {
     if (type === 'DELETE') { if (store.todos.some((t) => t.id === old.id)) store.drop(old.id); return; }
     const t = store.todos.find((x) => x.id === row.id);
@@ -936,16 +968,28 @@ export function mountShots(root) {
 
   // ---------- init ----------
   renderChrome();
-  (async () => {
+  const ready = (async () => {
     try {
-      [shots, store.todos] = await Promise.all([api().shots.list(), api().todos.list()]);
+      [shots, store.todos, refRows] = await Promise.all([api().shots.list(), api().todos.list(), api().refs.list().catch(() => [])]);
+      countRefs(refRows);
     } catch (e) { toast(`Could not load shots: ${errMsg(e)}`, 'error', 8000); }
     setView(view);
   })();
 
   return {
+    async reveal(code) {
+      await ready;
+      filter.sequence = code; filter.q = ''; searchInput.value = '';
+      if (view !== 'grid') setView('grid'); else { renderChrome(); renderBody(); }
+    },
+    async enter() {
+      history.replaceState(null, '', '#shots');
+      // counts may have changed while another tab was open
+      refRows = await api().refs.list().catch(() => refRows);
+      countRefs(refRows);
+      if (view === 'grid' && !editing) renderBody();
+    },
     leave() { closeEditor(true); document.querySelector('.todo-pop')?._close?.(); },
-    enter() { history.replaceState(null, '', '#shots'); },
-    destroy() { unsubShots(); unsubTodos(); offTeam(); offSettings(); offBoard?.(); },
+    destroy() { unsubRefs(); unsubShots(); unsubTodos(); offTeam(); offSettings(); offBoard?.(); },
   };
 }
