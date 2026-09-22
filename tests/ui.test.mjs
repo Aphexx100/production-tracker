@@ -576,6 +576,28 @@ try {
   assert.equal(await col('Micael').locator('.task', { hasText: 'Sky replacement comp v2' }).locator('select.fld.ms').evaluate((el) => el.selectedOptions[0].textContent), '◇ Sky pass approval');
   ok('text, due date, person, shot and milestone are edited directly on the card');
 
+  // New task dialog (button and N shortcut)
+  await page.click('.tasks-toolbar button:has-text("New task")');
+  await page.fill('.modal textarea[aria-label="Task"]', 'Order more fog fluid');
+  await page.selectOption('.modal select[aria-label="Person"]', 'Miguel');
+  await page.selectOption('.modal select[aria-label="Priority"]', 'high');
+  await page.fill('.modal input[aria-label="Due date"]', '2026-10-01');
+  await page.selectOption('.modal select[aria-label="Shot"]', { label: 'SQ010_0010' });
+  await page.click('.modal button:has-text("Create task")');
+  const fluid = col('Miguel').locator('.task', { hasText: 'Order more fog fluid' });
+  await fluid.waitFor();
+  assert.ok(await fluid.evaluate((el) => el.classList.contains('p-high')));
+  assert.equal(await fluid.locator('input.fld.due').inputValue(), '2026-10-01');
+  assert.equal(await fluid.locator('select.fld.shot').evaluate((el) => el.selectedOptions[0].textContent), 'SQ010_0010');
+  assert.equal(await page.locator('.modal').count(), 0);
+  await page.locator('.tasks-toolbar').click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press('n');
+  await page.waitForSelector('.modal textarea[aria-label="Task"]:focus');
+  assert.equal(await page.inputValue('.modal select[aria-label="Person"]'), 'Miguel', 'remembers the last person');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.tc-avatar, .avatar-foot').count(), 0, 'no round avatar in the card footer');
+  ok('“New task” dialog (button or N) creates a fully set task');
+
   // long content never spills out of its column (last column included)
   const sascha = col('Sascha');
   await sascha.locator('.todo-add').fill('Coordinate_the_underwater_plate_shoot_with_the_marine_unit_and_the_harbour_master_before_Friday_morning');

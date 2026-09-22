@@ -39,7 +39,8 @@ export function mountTasks(root) {
   const search = h('input.search', { type: 'search', placeholder: 'Search tasks…', 'aria-label': 'Search tasks' });
   search.addEventListener('input', () => { query = search.value.trim().toLowerCase(); render(); });
   const doneToggle = h('label.check', h('input', { type: 'checkbox', checked: showDone, on: { change: (e) => { showDone = e.target.checked; lsSet('pt-tasks-done', showDone); render(); } } }), 'Show completed');
-  const convertBtn = h('button.btn.primary', { type: 'button', title: 'Put every task that names a milestone onto the Timeline', on: { click: convertToMilestones } }, icon('calendar', 15), 'Convert to milestones');
+  const newBtn = h('button.btn.primary', { type: 'button', title: 'New task (N)', on: { click: () => newTask() } }, icon('plus', 15), 'New task');
+  const convertBtn = h('button.btn', { type: 'button', title: 'Put every task that names a milestone onto the Timeline', on: { click: convertToMilestones } }, icon('calendar', 15), 'Convert to milestones');
   const summary = h('span.faint.tasks-summary');
   const sortSel = h('select.tb-select', { 'aria-label': 'Sort tasks', title: 'Sort tasks' },
     h('option', { value: 'priority' }, 'Sort: Priority'), h('option', { value: 'due' }, 'Sort: Due date'), h('option', { value: 'newest' }, 'Sort: Newest'));
@@ -47,7 +48,7 @@ export function mountTasks(root) {
   sortSel.addEventListener('change', () => { sortBy = sortSel.value; lsSet('pt-tasks-sort', sortBy); render(); });
   const board = h('div.board.tasks-board');
   root.append(h('div.tasks',
-    h('div.tasks-toolbar', h('div.search-wrap', icon('search', 15), search), sortSel, doneToggle, summary, h('div.spacer'), convertBtn),
+    h('div.tasks-toolbar', h('div.search-wrap', icon('search', 15), search), sortSel, doneToggle, summary, h('div.spacer'), convertBtn, newBtn),
     h('div.board-wrap', board)));
 
   // ---------- lookups ----------
@@ -162,7 +163,7 @@ export function mountTasks(root) {
     prioSel.addEventListener('change', () => save(t, { priority: prioSel.value }, { rerender: true }));
 
     // person: an avatar with an invisible dropdown on top of it
-    const personSel = h('select.fld.person', { 'aria-label': 'Person', title: `${t.person} · click to hand over` },
+    const personSel = h('select.fld.person', { 'aria-label': 'Person', title: 'Hand over to someone else' },
       state.team.map((m) => h('option', { value: m.name }, m.name)));
     personSel.value = t.person;
     personSel.addEventListener('change', () => save(t, { person: personSel.value }, { rerender: true }));
@@ -213,7 +214,7 @@ export function mountTasks(root) {
       h('div.tc-meta', msSel, shotSel, h('span.tc-code', { title: 'Task code' }, `#${t.id.slice(0, 4)}`)),
       h('div.tc-foot',
         dueBox,
-        h('div.tc-avatar', avatar(t.person, 40), personSel),
+        h('label.tc-owner', h('span.tc-lbl', 'Owner'), personSel),
         h('label.tc-prio', h('span.tc-lbl', 'Priority'), h('span.tc-prio-row', prioSel, prioIcon(prio)))));
   }
 
@@ -254,6 +255,68 @@ export function mountTasks(root) {
     const i = tasks.findIndex((x) => x.id === row.id);
     if (i >= 0) tasks[i] = row; else tasks.push(row);
   }
+
+
+  // ---------- new task ----------
+  function newTask(person) {
+    const body = h('textarea', { rows: 3, maxLength: 2000, required: true, placeholder: 'What needs to be done?', 'aria-label': 'Task' });
+    const who = h('select', { 'aria-label': 'Person' }, state.team.map((m) => h('option', { value: m.name }, m.name)));
+    who.value = person || lsGet('pt-tasks-last-person', state.team[0]?.name) || state.team[0]?.name;
+    const prio = h('select', { 'aria-label': 'Priority' }, PRIORITIES.map((p) => h('option', { value: p.id }, p.label)));
+    prio.value = 'normal';
+    const due = h('input', { type: 'date', 'aria-label': 'Due date' });
+    const ms = h('select', { 'aria-label': 'Milestone' }, h('option', { value: '' }, '— none —'),
+      milestones.map((m) => h('option', { value: m.id }, `${m.kind === 'deadline' ? '⚑' : '◆'} ${m.title} · ${fmtDay(m.date, { day: 'numeric', month: 'short' })}`)));
+    const shot = h('select', { 'aria-label': 'Shot' }, h('option', { value: '' }, '— none —'), shots.map((x) => h('option', { value: x.id }, x.shot_name || 'untitled')));
+    const again = h('input', { type: 'checkbox', 'aria-label': 'Create another' });
+    const msg = h('p.form-msg');
+    const dlg = modal('New task', h('form.form.new-task', {
+      on: { submit: async (e) => {
+        e.preventDefault();
+        const text = body.value.trim();
+        if (!text) { msg.textContent = 'Enter what needs to be done.'; body.focus(); return; }
+        const m = msById(ms.value);
+        const row = {
+          person: who.value, body: text, priority: prio.value, due_date: due.value || null,
+          shot_id: shot.value || null, milestone_id: m?.id || null, milestone_title: m?.title || null,
+        };
+        try {
+          const created = await api().todos.create(row);
+          upsert(created);
+          lsSet('pt-tasks-last-person', who.value);
+          render();
+          emit('tasks-changed');
+          flash(created.id);
+          if (again.checked) { body.value = ''; msg.textContent = `Added for ${who.value}.`; body.focus(); }
+          else dlg.close();
+        } catch (err) { msg.textContent = `Could not create the task: ${isMissingTable(err) ? MIGRATION : errMsg(err)}`; }
+      } },
+    },
+    h('label', 'Task', body),
+    h('div.form-row', h('label', 'Person', who), h('label', 'Priority', prio), h('label', 'Due', due)),
+    h('div.form-row', h('label', 'Milestone', ms), h('label', 'Shot', shot)),
+    msg,
+    h('div.row.end', h('label.check', again, 'Create another'), h('button.btn.primary', { type: 'submit' }, 'Create task'))));
+    body.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); dlg.el.querySelector('form').requestSubmit(); } });
+    body.focus();
+  }
+
+  function flash(id) {
+    const el = board.querySelector(`.task[data-id="${CSS.escape(id)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 1600);
+  }
+
+  // N opens "New task" while this tab is visible and nothing is being typed
+  const onKey = (e) => {
+    if (root.hidden || e.key.toLowerCase() !== 'n' || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target.closest?.('input, textarea, select, [contenteditable="true"]') || document.querySelector('.modal-back')) return;
+    e.preventDefault();
+    newTask();
+  };
+  document.addEventListener('keydown', onKey);
 
   // ---------- convert to milestones ----------
   /** Group tasks by the milestone they name, and find what already exists. */
@@ -399,6 +462,6 @@ export function mountTasks(root) {
       await load();
       render();
     },
-    destroy() { unsubs.forEach((u) => u()); },
+    destroy() { unsubs.forEach((u) => u()); document.removeEventListener('keydown', onKey); },
   };
 }
