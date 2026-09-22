@@ -506,7 +506,8 @@ export function mountReferences(root) {
     const caption = h('div.viewer-caption');
     const prev = h('button.icon-btn.viewer-nav.prev', { type: 'button', 'aria-label': 'Previous' }, '‹');
     const next = h('button.icon-btn.viewer-nav.next', { type: 'button', 'aria-label': 'Next' }, '›');
-    const m = modal(seqLabel(start.sequence), h('div.viewer', prev, stage, next, caption), { wide: true, onClose: () => document.removeEventListener('keydown', onKey) });
+    // Arrows sit in the same frame as the media, so they stay centered on it.
+    const m = modal(seqLabel(start.sequence), h('div.viewer', h('div.viewer-frame', prev, stage, next), caption), { wide: true, onClose: () => document.removeEventListener('keydown', onKey) });
     m.el.classList.add('viewer-modal');
 
     async function show() {
@@ -517,9 +518,9 @@ export function mountReferences(root) {
           ? h('audio', { src: u, controls: true, autoplay: true })
           : h('video', { src: u, controls: true, autoplay: true, playsInline: true }));
       } else stage.replaceChildren(h('img', { src: u, alt: r.title || r.file_name || '' }));
-      caption.replaceChildren(h('strong', r.title || r.file_name), ` · ${kindOf(r.kind).label} · ${fmtSize(r.size_bytes)} · ${i + 1} / ${group.length}`,
+      caption.replaceChildren(...[h('strong', r.title || r.file_name), ` · ${kindOf(r.kind).label} · ${fmtSize(r.size_bytes)} · ${i + 1} / ${group.length}`,
         r.notes ? h('p', r.notes) : null,
-        h('button.btn.small', { type: 'button', on: { click: () => download(r) } }, icon('download', 14), 'Download'));
+        h('button.btn.small', { type: 'button', on: { click: () => download(r) } }, icon('download', 14), 'Download')].filter(Boolean));
       prev.hidden = next.hidden = group.length < 2;
     }
     const go = (d) => { i = (i + d + group.length) % group.length; show(); };

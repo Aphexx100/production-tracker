@@ -223,9 +223,27 @@ try {
 
   await seq('SQ010').locator('.ref-card', { hasText: 'mood' }).click();
   await page.waitForSelector('.viewer-stage img[src^="blob:"]');
+  await page.waitForFunction(() => document.querySelector('.viewer-stage img').complete);
+  const geo = await page.evaluate(() => {
+    const r = (sel) => document.querySelector(sel).getBoundingClientRect();
+    const img = r('.viewer-stage img'); const prev = r('.viewer-nav.prev'); const next = r('.viewer-nav.next');
+    const modal = document.querySelector('.viewer-modal');
+    const body = modal.querySelector('.modal-body');
+    return {
+      imgMid: img.top + img.height / 2, prevMid: prev.top + prev.height / 2, nextMid: next.top + next.height / 2,
+      prevVisible: prev.bottom <= innerHeight && prev.top >= 0,
+      modalH: modal.getBoundingClientRect().height, modalW: modal.getBoundingClientRect().width, vh: innerHeight, vw: innerWidth,
+      caption: document.querySelector('.viewer-caption').textContent,
+      scrolls: body.scrollHeight > body.clientHeight + 1 || modal.scrollHeight > modal.clientHeight + 1,
+    };
+  });
+  assert.ok(Math.abs(geo.prevMid - geo.imgMid) < 2 && Math.abs(geo.nextMid - geo.imgMid) < 2, JSON.stringify(geo));
+  assert.ok(geo.prevVisible && !geo.scrolls && geo.modalH > geo.vh * 0.9 && geo.modalW > geo.vw * 0.9, JSON.stringify(geo));
+  assert.doesNotMatch(geo.caption, /null|undefined/);
+  await page.screenshot({ path: 'test-results/viewer.png' });
   await page.keyboard.press('Escape');
   await page.waitForSelector('.viewer-stage', { state: 'detached' });
-  ok('picture opens in the viewer');
+  ok('viewer fills the window, arrows centered on the picture, no scrolling');
 
   await page.click('.kind-chip:has-text("PDFs")');
   assert.equal(await seq('SQ010').locator('.ref-card').count(), 1);
