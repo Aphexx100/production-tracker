@@ -18,6 +18,14 @@ const SORTS = {
   newest: (a, b) => b.created_at.localeCompare(a.created_at),
 };
 
+// Initials on a colour that stays the same for each person.
+function avatar(name, size) {
+  let hash = 0;
+  for (const ch of name || '?') hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  const initials = (name || '?').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+  return h('span.avatar', { style: { width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.4)}px`, background: `hsl(${hash % 360} 45% 42%)` }, 'aria-hidden': 'true' }, initials);
+}
+
 export function mountTasks(root) {
   let tasks = [];
   let milestones = [];
@@ -62,8 +70,9 @@ export function mountTasks(root) {
     summary.textContent = `${open.length} open${urgent.length ? ` · ${urgent.length} urgent` : ''}${overdue.length ? ` · ${overdue.length} overdue` : ''} · ${withMs.length} linked to milestones`;
     board.replaceChildren(...state.team.map((m) => {
       const mine = tasks.filter((t) => t.person === m.name);
-      const shown = mine.filter(matches).sort((a, b) => (a.done - b.done) || SORTS[sortBy](a, b) || a.created_at.localeCompare(b.created_at));
-      const add = h('input.todo-add', { placeholder: `New task for ${m.name}…`, maxLength: 2000, 'aria-label': `New task for ${m.name}`, dataset: { person: m.name } });
+      const openMine = mine.filter((t) => !t.done);
+      const shown = mine.filter(matches).sort((x, y) => SORTS[sortBy](x, y) || x.created_at.localeCompare(y.created_at));
+      const add = h('input.todo-add', { placeholder: `＋ New task for ${m.name}`, maxLength: 2000, 'aria-label': `New task for ${m.name}`, dataset: { person: m.name } });
       add.addEventListener('keydown', async (e) => {
         if (e.key !== 'Enter' || !add.value.trim()) return;
         const body = add.value.trim();
@@ -71,14 +80,51 @@ export function mountTasks(root) {
         try { upsert(await api().todos.create({ person: m.name, body })); render(); board.querySelector(`.todo-add[data-person="${CSS.escape(m.name)}"]`)?.focus(); }
         catch (err) { add.value = body; toast(`Could not add task: ${errMsg(err)}`, 'error'); }
       });
+      const urgentN = openMine.filter((t) => t.priority === 'urgent').length;
+      const lateN = openMine.filter((t) => t.due_date && t.due_date < todayISO()).length;
+      const openShown = shown.filter((t) => !t.done);
+      const doneShown = shown.filter((t) => t.done);
+      const body = [];
+      for (const g of groupsFor(openShown)) {
+        body.push(h(`div.lane-head.lane-${g.id}`, h('span', g.label), h('span.lane-n', String(g.items.length))));
+        body.push(h('ul.task-list', g.items.map(card)));
+      }
+      if (doneShown.length) {
+        body.push(h('details.done-group', h('summary', `Completed · ${doneShown.length}`), h('ul.task-list', doneShown.map(card))));
+      }
       return h('section.board-col', { dataset: { person: m.name } },
-        h('header', h('h3', m.name), h('span.count', `${mine.filter((t) => !t.done).length} open`)),
+        h('header.col-head',
+          avatar(m.name, 32),
+          h('div.col-title', h('h3', m.name), h('span.count', `${openMine.length} open`)),
+          h('div.col-badges',
+            urgentN ? h('span.cbadge.urgent', { title: `${urgentN} urgent` }, `${urgentN} urgent`) : null,
+            lateN ? h('span.cbadge.late', { title: `${lateN} overdue` }, `${lateN} late`) : null)),
         add,
-        shown.length ? h('ul.task-list', shown.map(card)) : h('p.empty-small', mine.length ? 'Nothing matches.' : 'No tasks.'));
+        body.length ? body : h('p.empty-small', mine.length ? 'Nothing matches.' : 'No tasks yet.'));
     }));
   }
 
-  // ---------- card with inline fields ----------
+  /** Lanes inside a column, matching the chosen sort. */
+  function groupsFor(list) {
+    const today = todayISO();
+    const inDays = (n) => { const d = new Date(`${today}T12:00:00`); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+    let defs;
+    if (sortBy === 'priority') {
+      defs = PRIORITIES.map((p) => ({ id: p.id, label: p.label, test: (t) => (t.priority || 'normal') === p.id }));
+    } else if (sortBy === 'due') {
+      defs = [
+        { id: 'late', label: 'Overdue', test: (t) => t.due_date && t.due_date < today },
+        { id: 'soon', label: 'Next 7 days', test: (t) => t.due_date && t.due_date >= today && t.due_date <= inDays(7) },
+        { id: 'later', label: 'Later', test: (t) => t.due_date && t.due_date > inDays(7) },
+        { id: 'nodate', label: 'No due date', test: (t) => !t.due_date },
+      ];
+    } else {
+      return list.length ? [{ id: 'all', label: 'Newest first', items: list }] : [];
+    }
+    return defs.map((d) => ({ ...d, items: list.filter(d.test) })).filter((d) => d.items.length);
+  }
+
+  // ---------- card (inspired by playing-card style boards) ----------
   function card(t) {
     const prio = t.priority || 'normal';
     const cb = h('input', { type: 'checkbox', checked: t.done, 'aria-label': `Done: ${t.body}` });
@@ -100,26 +146,33 @@ export function mountTasks(root) {
       if (v !== t.body) { text.textContent = v; save(t, { body: v }); }
     });
 
+    const late = !t.done && t.due_date && t.due_date < todayISO();
+    const due = h(`input.fld.due${late ? '.late' : ''}${t.due_date ? '' : '.is-empty'}`, { type: 'date', value: t.due_date || '', 'aria-label': 'Due date', title: late ? 'Overdue' : 'Due date' });
+    due.addEventListener('change', () => save(t, { due_date: due.value || null }, { rerender: true }));
+    // compact label; the real date input sits invisibly on top and opens the picker
+    const dueBox = h('label.tc-due', { title: t.due_date ? `Due ${fmtDay(t.due_date)}${late ? ' (overdue)' : ''}` : 'Set a due date' },
+      h('span.tc-lbl', late ? 'Overdue' : 'Due'),
+      h('span.tc-due-val', t.due_date ? fmtDay(t.due_date, { day: 'numeric', month: 'short' }) : 'Set date'),
+      due);
+    due.addEventListener('click', () => { try { due.showPicker(); } catch { /* older browsers open it themselves */ } });
+
     const prioSel = h(`select.fld.prio.p-${prio}`, { 'aria-label': 'Priority', title: 'Priority' },
       PRIORITIES.map((p) => h('option', { value: p.id }, p.label)));
     prioSel.value = prio;
     prioSel.addEventListener('change', () => save(t, { priority: prioSel.value }, { rerender: true }));
 
-    const late = !t.done && t.due_date && t.due_date < todayISO();
-    const due = h(`input.fld.due${late ? '.late' : ''}${t.due_date ? '' : '.empty'}`, { type: 'date', value: t.due_date || '', 'aria-label': 'Due date', title: late ? 'Overdue' : 'Due date' });
-    due.addEventListener('change', () => save(t, { due_date: due.value || null }, { rerender: true }));
-
-    const personSel = h('select.fld.person', { 'aria-label': 'Person', title: 'Move to another person' },
+    // person: an avatar with an invisible dropdown on top of it
+    const personSel = h('select.fld.person', { 'aria-label': 'Person', title: `${t.person} · click to hand over` },
       state.team.map((m) => h('option', { value: m.name }, m.name)));
     personSel.value = t.person;
     personSel.addEventListener('change', () => save(t, { person: personSel.value }, { rerender: true }));
 
     const linked = msById(t.milestone_id);
-    const msSel = h(`select.fld.ms${linked ? `.${linked.kind}` : t.milestone_title ? '.pending' : '.empty'}`, {
+    const msSel = h(`select.fld.ms${linked ? `.${linked.kind}` : t.milestone_title ? '.pending' : '.is-empty'}`, {
       'aria-label': 'Milestone',
       title: linked ? `On the Timeline: ${linked.title}, ${fmtDay(linked.date)}` : t.milestone_title ? 'Named milestone, not on the Timeline yet. Use “Convert to milestones”.' : 'Link to a milestone',
     },
-    h('option', { value: '' }, 'No milestone'),
+    h('option', { value: '' }, '◇ Milestone'),
     milestones.map((m) => h('option', { value: m.id }, `${m.kind === 'deadline' ? '⚑' : '◆'} ${m.title}`)),
     !linked && t.milestone_title ? h('option', { value: '__pending' }, `◇ ${t.milestone_title}`) : null,
     h('option', { value: '__new' }, 'New name…'));
@@ -137,22 +190,16 @@ export function mountTasks(root) {
       await save(t, { milestone_id: m?.id || null, milestone_title: m ? m.title : null }, { rerender: true });
     });
 
-    const shotSel = h(`select.fld.shot${t.shot_id ? '' : '.empty'}`, { 'aria-label': 'Shot', title: 'Shot' },
-      h('option', { value: '' }, 'No shot'), shots.map((s) => h('option', { value: s.id }, s.shot_name || 'untitled')));
+    const shotSel = h(`select.fld.shot${t.shot_id ? '' : '.is-empty'}`, { 'aria-label': 'Shot', title: 'Shot' },
+      h('option', { value: '' }, '🎬 Shot'), shots.map((s) => h('option', { value: s.id }, s.shot_name || 'untitled')));
     shotSel.value = t.shot_id || '';
     shotSel.addEventListener('change', () => save(t, { shot_id: shotSel.value || null }, { rerender: true }));
 
-    const links = [];
-    if (t.shot_id && shotById(t.shot_id)) {
-      links.push(h('button.icon-btn.small', { type: 'button', title: 'Open the shot in the shot tracker', 'aria-label': 'Open shot', on: { click: () => emit('navigate', { tab: 'shots', shot: t.shot_id }) } }, icon('film', 13)));
-    }
-    if (linked) {
-      links.push(h('button.icon-btn.small', { type: 'button', title: 'Show on the Timeline', 'aria-label': 'Show on the Timeline', on: { click: () => emit('navigate', { tab: 'timeline' }) } }, icon('calendar', 13)));
-    }
+    const tools = [];
+    if (t.shot_id && shotById(t.shot_id)) tools.push(h('button.icon-btn.small', { type: 'button', title: 'Open the shot in the shot tracker', 'aria-label': 'Open shot', on: { click: () => emit('navigate', { tab: 'shots', shot: t.shot_id }) } }, icon('film', 14)));
+    if (linked) tools.push(h('button.icon-btn.small', { type: 'button', title: 'Show on the Timeline', 'aria-label': 'Show on the Timeline', on: { click: () => emit('navigate', { tab: 'timeline' }) } }, icon('calendar', 14)));
     const daily = dailyById(t.daily_id);
-    const src = daily ? h('button.tchip.src', { type: 'button', title: t.source_quote ? `From the call: “${t.source_quote}”` : 'Open the call summary', on: { click: () => emit('navigate', { tab: 'dailies', daily: daily.id }) } },
-      icon('note', 12), `Call ${fmtDay(daily.day, { day: 'numeric', month: 'short' })}`) : null;
-
+    if (daily) tools.push(h('button.icon-btn.small', { type: 'button', title: t.source_quote ? `From the call on ${fmtDay(daily.day)}: “${t.source_quote}”` : `Open the call of ${fmtDay(daily.day)}`, 'aria-label': 'Open the call summary', on: { click: () => emit('navigate', { tab: 'dailies', daily: daily.id }) } }, icon('note', 14)));
     const del = h('button.icon-btn.small.task-del', { type: 'button', title: 'Delete task', 'aria-label': `Delete ${t.body}` }, icon('trash', 14));
     del.addEventListener('click', async () => {
       if (!(await confirmDialog(`Delete the task “${t.body}”?`))) return;
@@ -160,9 +207,23 @@ export function mountTasks(root) {
       catch (err) { toast(errMsg(err), 'error'); }
     });
 
-    return h(`li.task.p-${prio}${t.done ? '.done' : ''}`, { dataset: { id: t.id } },
-      h('div.task-top', h('label.todo-check', cb), text, del),
-      h('div.task-fields', prioSel, due, personSel, msSel, shotSel, ...links, src));
+    return h(`li.task.p-${prio}${t.done ? '.done' : ''}${late ? '.is-late' : ''}${t.due_date ? '.has-due' : ''}`, { dataset: { id: t.id } },
+      h('div.tc-top', h('label.tc-check', { title: t.done ? 'Mark as open' : 'Mark as done' }, cb), h('div.spacer'), ...tools, del),
+      text,
+      h('div.tc-meta', msSel, shotSel, h('span.tc-code', { title: 'Task code' }, `#${t.id.slice(0, 4)}`)),
+      h('div.tc-foot',
+        dueBox,
+        h('div.tc-avatar', avatar(t.person, 40), personSel),
+        h('label.tc-prio', h('span.tc-lbl', 'Priority'), h('span.tc-prio-row', prioSel, prioIcon(prio)))));
+  }
+
+  function prioIcon(p) {
+    const n = { urgent: 3, high: 2, normal: 1, low: 0 }[p];
+    const paths = ['M6 15l6-5 6 5', 'M6 10l6-5 6 5', 'M6 20l6-5 6 5'].slice(0, n).join('');
+    const span = document.createElement('span');
+    span.className = 'tc-prio-ico';
+    span.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${n ? `<path d="${paths}"/>` : '<path d="M7 12h10"/>'}</svg>`;
+    return span;
   }
 
   function askText(title, placeholder) {

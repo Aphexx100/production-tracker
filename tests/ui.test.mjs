@@ -464,7 +464,7 @@ try {
   const mihaiTask = col('Mihai').locator('.task', { hasText: 'fog machine' });
   assert.equal(await mihaiTask.locator('input.fld.due').inputValue(), '2026-10-02');
   assert.equal(await mihaiTask.locator('select.fld.ms').evaluate((el) => el.selectedOptions[0].textContent), '⚑ SQ010 VFX turnover');
-  assert.equal(await mihaiTask.locator('.tchip.src').count(), 1);
+  assert.equal(await mihaiTask.locator('button[aria-label="Open the call summary"]').count(), 1);
   const rafTask = col('Rafael').locator('.task', { hasText: 'Roto Mara' });
   assert.equal(await rafTask.locator('select.fld.ms').evaluate((el) => el.selectedOptions[0].textContent), '◇ Final grade');
   assert.equal(await rafTask.locator('select.fld.shot').evaluate((el) => el.selectedOptions[0].textContent), 'SQ010_0020');
@@ -523,7 +523,7 @@ try {
   ok('timeline milestones show their linked tasks');
 
   await page.click('#tab-tasks');
-  await mihaiTask.locator('.tchip.src').click();
+  await mihaiTask.locator('button[aria-label="Open the call summary"]').click();
   await page.waitForFunction(() => document.querySelector('#pane-dailies:not([hidden]) .title-input')?.value === 'Production meeting');
   ok('a task links back to the call it came from');
 
@@ -543,8 +543,11 @@ try {
   await sky.locator('select.fld.prio').selectOption('urgent');
   await page.waitForFunction(() => document.querySelector('.tasks-board .board-col[data-person="Mihai"] .task').classList.contains('p-urgent'));
   assert.deepEqual((await titles(mihai))[0], 'Sky replacement comp');
+  const lanes = () => mihai.locator('.lane-head > span:first-child').allTextContents();
+  assert.deepEqual(await lanes(), ['Urgent', 'Normal']);
   await page.selectOption('.tasks-toolbar select[aria-label="Sort tasks"]', 'due');
   assert.deepEqual((await titles(mihai))[0], 'Mihai books the fog machine by 2026-10-02 for the SQ010 VFX turnover.');
+  assert.deepEqual(await lanes(), ['Later', 'No due date']);
   await page.selectOption('.tasks-toolbar select[aria-label="Sort tasks"]', 'priority');
   assert.match(await page.textContent('.tasks-summary'), /1 urgent/);
   let dbT = await page.evaluate(() => JSON.parse(localStorage.getItem('pt-demo-db-v1')));
