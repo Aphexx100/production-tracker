@@ -76,7 +76,7 @@ export function createEditor(mount, { content = '', compact = false, placeholder
       Placeholder.configure({ placeholder }),
     ],
     editorProps: {
-      attributes: { class: `prose${compact ? ' compact' : ''}`, spellcheck: 'true' },
+      attributes: { class: `prose${compact ? ' compact' : ''}`, spellcheck: 'true', lang: 'en' },
       handlePaste(view, event) {
         const files = imageFiles(event.clipboardData);
         if (!files.length) return false;

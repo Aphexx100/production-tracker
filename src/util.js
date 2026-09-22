@@ -63,6 +63,9 @@ export function errMsg(e) {
   return e?.message || e?.error_description || String(e);
 }
 
+// The whole app is in English, whatever language the browser is set to.
+export const LOCALE = 'en-GB';
+
 export const todayISO = () => {
   const d = new Date();
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
@@ -70,7 +73,7 @@ export const todayISO = () => {
 
 export function fmtDay(iso, opts = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) {
   if (!iso) return '';
-  return new Date(iso + 'T12:00:00').toLocaleDateString(undefined, opts);
+  return new Date(iso + 'T12:00:00').toLocaleDateString(LOCALE, opts);
 }
 
 export function fmtTime(ts) {
@@ -78,8 +81,8 @@ export function fmtTime(ts) {
   const d = new Date(ts);
   const sameDay = d.toDateString() === new Date().toDateString();
   return sameDay
-    ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-    : d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    ? d.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleString(LOCALE, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
 /** Frames to SMPTE-style timecode (non-drop). */

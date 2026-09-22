@@ -63,7 +63,9 @@ assert.match(prompt, /Call date: 2026-09-21/);
 assert.match(prompt, /- Mihai\n- Sascha/);
 assert.match(prompt, /VFX turnover \(deadline, 2026-10-06\)/);
 assert.match(prompt, /<notes>\nMihai books the fog machine/);
-ok('sends notes, team, shots and milestones to claude-opus-5 with a strict JSON schema');
+assert.match(lastRequest.system, /Always write in English/);
+assert.match(lastRequest.system, /body: a short imperative sentence in English/);
+ok('sends notes, team, shots and milestones to claude-opus-5 with a strict JSON schema, English output');
 
 res = await fn.handle(req({ daily_id: DAILY }), { env: env(), supabase: () => fakeSupabase({ approved: false }), anthropic: () => { throw new Error('must not call Claude'); } });
 assert.equal(res.status, 403);

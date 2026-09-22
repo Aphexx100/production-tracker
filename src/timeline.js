@@ -1,4 +1,4 @@
-import { h, $, toast, errMsg, modal, confirmDialog, lsGet, lsSet, todayISO, fmtDay } from './util.js';
+import { h, $, toast, errMsg, modal, confirmDialog, lsGet, lsSet, todayISO, fmtDay, LOCALE } from './util.js';
 import { icon } from './icons.js';
 import { api, emit, on } from './state.js';
 import { isMissingTable } from './sequences.js';
@@ -170,7 +170,7 @@ export function mountTimeline(root) {
       const next = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) / MS_DAY;
       const w = (Math.min(next, end) - n) * dw();
       months.append(h('div.tl-month', { style: { left: `${(n - origin) * dw()}px`, width: `${w}px` } },
-        h('span.tl-month-txt', d.toLocaleDateString(undefined, { month: zoom === 'month' ? 'short' : 'long', year: 'numeric', timeZone: 'UTC' }))));
+        h('span.tl-month-txt', d.toLocaleDateString(LOCALE, { month: zoom === 'month' ? 'short' : 'long', year: 'numeric', timeZone: 'UTC' }))));
       n = next;
     }
     // lower tier: day numbers, or week starts
@@ -179,7 +179,7 @@ export function mountTimeline(root) {
       const d = new Date(dn * MS_DAY);
       if (zoom === 'day') {
         ticks.append(h(`div.tl-tick${weekday(dn) % 6 === 0 ? '.we' : ''}`, { style: { left: `${i * dw()}px`, width: `${dw()}px` } },
-          h('b', String(d.getUTCDate())), h('span', d.toLocaleDateString(undefined, { weekday: 'narrow', timeZone: 'UTC' }))));
+          h('b', String(d.getUTCDate())), h('span', d.toLocaleDateString(LOCALE, { weekday: 'narrow', timeZone: 'UTC' }))));
       } else if (zoom === 'week' && weekday(dn) === 1) {
         ticks.append(h('div.tl-tick.wk', { style: { left: `${i * dw()}px`, width: `${7 * dw()}px` } }, String(d.getUTCDate())));
       }

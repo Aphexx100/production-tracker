@@ -9,7 +9,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const server = await preview({ root, preview: { port: 5199, strictPort: true }, logLevel: 'silent' });
 const URL_ = 'http://localhost:5199/?demo';
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Berlin' });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: 'de-DE', timezoneId: 'Europe/Berlin' }); // German browser: the app must still be English
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
@@ -566,6 +566,20 @@ try {
     .map((e) => `${e.tagName}.${e.className}`));
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `overflow: ${over.slice(0, 5).join(', ')}`);
   ok('phone width without page overflow');
+
+  // English everywhere, even in a German browser
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${URL_}#timeline`);
+  await page.waitForSelector('.tl-month-txt');
+  const months = await page.$$eval('.tl-month-txt', (els) => els.map((e) => e.textContent).join(' '));
+  assert.doesNotMatch(months, /Januar|Februar|März|Mai|Juni|Juli|Oktober|Dezember/);
+  assert.match(months, /(January|February|March|April|May|June|July|August|September|October|November|December) \d{4}/);
+  await page.click('#tab-dailies');
+  await page.waitForSelector('.day-date');
+  const dayLabels = await page.$$eval('.day-date', (els) => els.map((e) => e.textContent).join(' '));
+  assert.doesNotMatch(dayLabels, /\b(Mo|Di|Mi|Do|Fr|Sa|So)\./);
+  assert.match(dayLabels, /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b/);
+  ok('dates are English even when the browser is German');
 
   const real = errors.filter((e) => !/Failed to load resource/.test(e));
   assert.deepEqual(real, [], `console errors: ${real.join(' | ')}`);
