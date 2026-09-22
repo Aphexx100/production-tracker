@@ -488,6 +488,8 @@ textarea.cell-input { height: auto; min-height: 110px; resize: vertical; box-sha
   border-radius: 999px; padding: 2px 8px; font-size: 12.5px; cursor: pointer; font-family: var(--mono);
 }
 
+.setup-note { margin: 40px auto; max-width: 520px; text-align: center; color: var(--text-2); }
+
 /* ---------- small screens ---------- */
 @media (max-width: 760px) {
   .app-head { gap: 6px; padding: 0 8px; }

@@ -6,6 +6,7 @@ import { createEditor } from './editor.js';
 import { resolveImages, resolveHtml, stripImageUrls, uploadImage, imageFiles } from './media.js';
 import { todoStore, todoChips, openTodoPopover, renderBoard } from './todos.js';
 import { parseDelimited } from './csv.js';
+import { askSequenceName, saveSequence } from './sequences.js';
 
 export const STATUSES = [
   { id: 'wtg', label: 'Waiting' },
@@ -27,7 +28,7 @@ const statusLabel = (id) => STATUSES.find((s) => s.id === id)?.label || id;
 const T = {
   status: "Where the shot is in the pipeline: Waiting (not ready), Ready (prepped to shoot), In progress, Shot (filmed), In review (with the director or VFX supervisor), Approved (final), On hold, Omitted (cut from the film).",
   shot_name: "Unique shot code, usually sequence + shot number, e.g. SQ010_0020. Numbers go up in steps of 10 so new shots can be slotted in between (0015).",
-  sequence: "Sequence: a group of scenes that form one continuous story beat, e.g. SQ010 = “the harbour chase”. One sequence contains one or more scenes. The paperclip opens this sequence's references.",
+  sequence: "Sequence: a group of scenes that form one continuous story beat, e.g. SQ010 = “the harbour chase”. One sequence contains one or more scenes. Pick one from the dropdown or create a new one there; sequences made in References show up here too. The paperclip opens this sequence's references.",
   scene: "Scene number from the script: the action in one location at one time. A scene is covered by one or more shots.",
   description: "What happens in the shot: action, framing, dialogue cues. Paste storyboards or reference images here.",
   shot_type: "Shot size, i.e. how much of the subject is in frame: EWS extreme wide, WS wide, MWS medium wide, MS medium, MCU medium close-up, CU close-up, ECU extreme close-up, OTS over-the-shoulder, POV point of view, Insert = detail of an object.",
@@ -54,7 +55,7 @@ const T = {
 const COLUMNS = [
   { key: 'status', tip: T.status, label: 'Status', type: 'select', w: 116, options: () => STATUSES.map((s) => [s.id, s.label]) },
   { key: 'shot_name', tip: T.shot_name, label: 'Shot', type: 'text', w: 130 },
-  { key: 'sequence', tip: T.sequence, label: 'Seq', type: 'text', w: 104 },
+  { key: 'sequence', tip: T.sequence, label: 'Seq', type: 'select', allowNew: true, w: 104, options: () => [['', '—'], ...(refreshKnown(), knownSequences).map((q) => [q.code, q.title ? `${q.code} — ${q.title}` : q.code]), [NEW_SEQ, '＋ New sequence…']] },
   { key: 'scene', tip: T.scene, label: 'Scene', type: 'text', w: 62 },
   { key: 'description', tip: T.description, label: 'Description', type: 'rich', w: 320 },
   { key: 'shot_type', tip: T.shot_type, label: 'Size', type: 'text', w: 70, suggest: SHOT_TYPES },
@@ -76,6 +77,11 @@ const COLUMNS = [
   { key: '_todo', tip: T._todo, label: 'To-do', type: 'todo', w: 200 },
   { key: 'updated_at', tip: T.updated_at, label: 'Updated', type: 'meta', w: 130, hidden: true },
 ];
+// Sequences from the sequences table plus any code already used by a shot or reference.
+const NEW_SEQ = '__new_sequence__';
+let knownSequences = [];
+let refreshKnown = () => {};
+
 const EDITABLE = new Set(['text', 'int', 'select', 'date', 'rich', 'long']);
 const PREFS = 'pt-grid-prefs-v1';
 
@@ -344,18 +350,17 @@ export function mountShots(root) {
     applyPin(td, c.key);
     const v = s[c.key];
     switch (c.type) {
-      case 'text':
-        if (c.key === 'sequence' && v) {
-          const n = refCounts.get(v) || 0;
-          td.append(h('span', v), h('button.seq-ref', {
-            type: 'button', dataset: { seq: v },
-            title: n ? `${n} reference${n === 1 ? '' : 's'} for ${v}. Open in References.` : `No references for ${v} yet. Open in References to add some.`,
-            'aria-label': `References for ${v}`,
-          }, icon('paperclip', 12), n ? String(n) : ''));
-        } else td.textContent = v ?? '';
-        break;
       case 'select':
-        if (c.key === 'status') td.append(h(`span.status.st-${v}`, statusLabel(v)));
+        if (c.key === 'sequence') {
+          if (v) {
+            const n = refCounts.get(v) || 0;
+            td.append(h('span', v), h('button.seq-ref', {
+              type: 'button', dataset: { seq: v },
+              title: n ? `${n} reference${n === 1 ? '' : 's'} for ${v}. Open in References.` : `No references for ${v} yet. Open in References to add some.`,
+              'aria-label': `References for ${v}`,
+            }, icon('paperclip', 12), n ? String(n) : ''));
+          }
+        } else if (c.key === 'status') td.append(h(`span.status.st-${v}`, statusLabel(v)));
         else if (c.key === 'priority') td.append(h(`span.prio.p-${v}`, v));
         else td.textContent = v || '';
         break;
@@ -578,7 +583,8 @@ export function mountShots(root) {
     if (col.type === 'select') {
       const opts = col.options();
       const hit = opts.find(([v, l]) => v.toLowerCase() === s.toLowerCase() || String(l).toLowerCase() === s.toLowerCase());
-      if (!hit) return undefined;
+      if (!hit) return col.allowNew && s !== NEW_SEQ ? s.slice(0, 40) : undefined;
+      if (hit[0] === NEW_SEQ) return undefined;
       return col.key === 'assignee' && !hit[0] ? null : hit[0];
     }
     if (col.type === 'rich') return s ? `<p>${s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]))}</p>` : '';
@@ -634,6 +640,7 @@ export function mountShots(root) {
 
     const finish = (save) => {
       box.remove(); td.classList.remove('editing');
+      if (save && col.allowNew && input.value === NEW_SEQ) { createSequenceFor(id); return; }
       if (save && input.value !== original) commit(id, key, parseValue(col, input.value) ?? s[key]);
       scroller.focus({ preventScroll: true });
     };
@@ -941,6 +948,31 @@ export function mountShots(root) {
       if (view === 'grid' && !editing) renderBody();
     }
   });
+  // ---------- sequences (shared with References) ----------
+  let seqMeta = [];
+  function refreshSequences() {
+    const codes = new Set([...seqMeta.map((q) => q.code), ...shots.map((x) => x.sequence), ...refRows.map((r) => r.sequence)]);
+    codes.delete(''); codes.delete(null); codes.delete(undefined);
+    const order = new Map(seqMeta.map((q) => [q.code, q.sort_order]));
+    knownSequences = [...codes]
+      .sort((a, b) => (order.get(a) ?? 1e9) - (order.get(b) ?? 1e9) || a.localeCompare(b, undefined, { numeric: true }))
+      .map((code) => ({ code, title: seqMeta.find((q) => q.code === code)?.title || '' }));
+  }
+  refreshKnown = refreshSequences;
+  async function createSequenceFor(shotId) {
+    const name = await askSequenceName();
+    scroller.focus({ preventScroll: true });
+    if (!name) return;
+    const row = await saveSequence(name, seqMeta);
+    if (row && !seqMeta.some((q) => q.code === row.code)) seqMeta.push(row);
+    await commit(shotId, 'sequence', name);
+    refreshSequences();
+  }
+  const unsubSeqs = api().subscribe('sequences', (type, row, old) => {
+    seqMeta = type === 'DELETE' ? seqMeta.filter((q) => q.code !== old.code) : [...seqMeta.filter((q) => q.code !== row.code), row];
+    refreshSequences();
+  });
+
   // Reference counts per sequence, shown as a paperclip in the Seq column.
   let refCounts = new Map();
   const countRefs = (rows) => {
@@ -970,8 +1002,12 @@ export function mountShots(root) {
   renderChrome();
   const ready = (async () => {
     try {
-      [shots, store.todos, refRows] = await Promise.all([api().shots.list(), api().todos.list(), api().refs.list().catch(() => [])]);
+      [shots, store.todos, refRows, seqMeta] = await Promise.all([
+        api().shots.list(), api().todos.list(),
+        api().refs.list().catch(() => []), api().sequences.list().catch(() => []),
+      ]);
       countRefs(refRows);
+      refreshSequences();
     } catch (e) { toast(`Could not load shots: ${errMsg(e)}`, 'error', 8000); }
     setView(view);
   })();
@@ -985,11 +1021,12 @@ export function mountShots(root) {
     async enter() {
       history.replaceState(null, '', '#shots');
       // counts may have changed while another tab was open
-      refRows = await api().refs.list().catch(() => refRows);
+      [refRows, seqMeta] = await Promise.all([api().refs.list().catch(() => refRows), api().sequences.list().catch(() => seqMeta)]);
       countRefs(refRows);
+      refreshSequences();
       if (view === 'grid' && !editing) renderBody();
     },
     leave() { closeEditor(true); document.querySelector('.todo-pop')?._close?.(); },
-    destroy() { unsubRefs(); unsubShots(); unsubTodos(); offTeam(); offSettings(); offBoard?.(); },
+    destroy() { unsubSeqs(); unsubRefs(); unsubShots(); unsubTodos(); offTeam(); offSettings(); offBoard?.(); },
   };
 }

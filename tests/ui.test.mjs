@@ -256,6 +256,39 @@ try {
   assert.match(page.url(), /#references\/SQ010$/);
   ok('paperclip in the Seq column jumps to that sequence’s references');
 
+  // sequences shared between References and the shot tracker
+  await page.click('.refs .sidebar button:has-text("New sequence")');
+  assert.equal(await page.locator('.modal input').count(), 1, 'only a name field');
+  await page.fill('.modal input', 'Rooftop escape');
+  await page.click('.modal button:has-text("Create")');
+  await page.waitForSelector('section.seq[data-seq="Rooftop escape"]');
+  ok('new sequence asks only for a name');
+
+  await page.click('#tab-shots');
+  await page.waitForSelector('#pane-shots:not([hidden]) tr.shot-row');
+  const seqCell = page.locator('tr.shot-row').nth(3).locator('td[data-key="sequence"]');
+  await seqCell.click();
+  await seqCell.click();
+  await page.waitForSelector('select.cell-input');
+  const opts = await page.$$eval('select.cell-input option', (o) => o.map((x) => x.textContent));
+  assert.ok(opts.includes('Rooftop escape') && opts.includes('SQ010 — Harbour at dawn') && opts.at(-1).includes('New sequence'), opts.join('|'));
+  await page.selectOption('select.cell-input', 'Rooftop escape');
+  await page.waitForFunction(() => document.querySelectorAll('tr.shot-row')[3].querySelector('td[data-key="sequence"] > span')?.textContent === 'Rooftop escape');
+  ok('sequence created in References is selectable in the Seq dropdown');
+
+  await seqCell.click();
+  await seqCell.click();
+  await page.waitForSelector('select.cell-input');
+  await page.selectOption('select.cell-input', '__new_sequence__');
+  await page.waitForSelector('.modal input');
+  await page.fill('.modal input', 'SQ040');
+  await page.click('.modal button:has-text("Create")');
+  await page.waitForFunction(() => document.querySelectorAll('tr.shot-row')[3].querySelector('td[data-key="sequence"] > span')?.textContent === 'SQ040');
+  await page.click('#tab-references');
+  await page.waitForSelector('section.seq[data-seq="SQ040"]');
+  assert.ok(await page.locator('section.seq[data-seq="Rooftop escape"]').count(), 'unused sequence stays');
+  ok('new sequence can be created from the shot tracker and appears in References');
+
   // security: stored markup must not run script
   await page.evaluate(() => {
     const db = JSON.parse(localStorage.getItem('pt-demo-db-v1'));

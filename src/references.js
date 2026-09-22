@@ -1,6 +1,7 @@
 import { h, $, $$, toast, errMsg, fmtTime, modal, confirmDialog, lsGet, lsSet } from './util.js';
 import { icon } from './icons.js';
 import { api, state, emit, isAdmin, profileName } from './state.js';
+import { askSequenceName, saveSequence, isMissingTable, MIGRATION_HINT } from './sequences.js';
 
 // Display order and labels of the file-type groups inside a sequence.
 export const KINDS = [
@@ -110,6 +111,7 @@ export function mountReferences(root) {
   const collapsed = new Set(lsGet('pt-ref-collapsed', []));
   const uploads = new Map(); // sequence -> [{name, progress, el}]
   let active = null;
+  let missing = false; // 002_references.sql not run yet
 
   const nav = h('nav.seq-nav', { 'aria-label': 'Sequences' });
   const newSeqBtn = h('button.btn.primary.block', { type: 'button', on: { click: newSequence } }, icon('plus', 16), 'New sequence');
@@ -165,6 +167,11 @@ export function mountReferences(root) {
   }
 
   function renderMain() {
+    if (missing) {
+      list.replaceChildren(h('div.setup-note', h('h2', 'References are not set up yet'), h('p', MIGRATION_HINT)));
+      newSeqBtn.disabled = true;
+      return;
+    }
     const scroll = list.scrollTop;
     list.replaceChildren(...sequences().map(renderSection));
     list.scrollTop = scroll;
@@ -511,23 +518,15 @@ export function mountReferences(root) {
   }
   const nextOrder = () => Math.max(0, ...seqMeta.map((s) => s.sort_order)) + 1;
 
-  function newSequence() {
-    const code = h('input', { required: true, maxLength: 40, placeholder: 'e.g. SQ030', 'aria-label': 'Sequence code' });
-    const title = h('input', { maxLength: 200, placeholder: 'e.g. Rooftop escape', 'aria-label': 'Sequence title' });
-    const m = modal('New sequence', h('form.form', {
-      on: { submit: async (e) => {
-        e.preventDefault();
-        const c = code.value.trim();
-        if (!c) return;
-        if (sequences().includes(c)) { m.close(); reveal(c); return; }
-        m.close();
-        await saveSeq(c, { title: title.value.trim() });
-        renderMain(); reveal(c);
-      } },
-    }, h('p.faint', 'Use the same code as in the “Seq” column of the shot tracker so both stay linked.'),
-    h('label', 'Code', code), h('label', 'Title', title),
-    h('div.row.end', h('button.btn.primary', { type: 'submit' }, 'Create'))));
-    code.focus();
+  async function newSequence() {
+    const c = await askSequenceName();
+    if (!c) return;
+    if (!sequences().includes(c)) {
+      const row = await saveSequence(c, seqMeta);
+      if (!row) return;
+      seqMeta.push(row);
+    }
+    renderMain(); reveal(c);
   }
 
   async function deleteSeq(code) {
@@ -570,7 +569,12 @@ export function mountReferences(root) {
   const ready = (async () => {
     try {
       [refs, seqMeta] = await Promise.all([api().refs.list(), api().sequences.list(), loadShots()]);
-    } catch (e) { toast(`Could not load references: ${errMsg(e)}`, 'error', 8000); }
+    } catch (e) {
+      if (isMissingTable(e)) {
+        missing = true;
+      }
+      toast(`Could not load references: ${errMsg(e)}`, 'error', 8000);
+    }
     rerender();
   })();
 
