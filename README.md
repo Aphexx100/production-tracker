@@ -6,6 +6,7 @@ A small web app for tracking a film production: daily call summaries and a shot 
 - **Shot tracker**: a spreadsheet-style grid with shot name, description (with images), lens, comments and per-person to-dos. It also has Shotgrid-style extras: status pipeline, frame in/out with length and timecode, handles, sequence and scene, shot size, camera and movement, location, INT/EXT, day/night, shoot day, assignee, priority and due date.
 - **References**: one container per sequence (the same codes as the "Seq" column), with files sorted into Movies, Pictures, PDFs, Links, Audio, Documents, 3D & scenes and Other. Drag files or links from your desktop or browser onto a sequence to upload them. Movies and pictures get thumbnails and open in a viewer; PDFs open in a new tab. The paperclip next to each Seq in the shot tracker jumps to its references, and "Shots" on a sequence filters the shot tracker to it.
 - **Timeline**: a Gantt chart with one row per sequence that opens into its shots. Drag bars to move them, drag their ends to change dates, or drag across an empty row to plan it. Milestones (◆) and deadlines (⚑) can belong to the whole project, a sequence or a single shot; overdue deadlines turn red and the next ones show at the top. Shoot days and shot due dates appear as markers. Zoom by days, weeks or months.
+- **Tasks**: a task list per team member, with due dates, links to shots, to the call they came from, and to milestones. **Convert to task list** on a daily summary lets Claude read the call and propose every action item (person, due date, shot, milestone); you review and fix them before anything is created. **Convert to milestones** turns the milestones that tasks mention into deadlines on the Timeline and links the tasks; if a milestone already exists, it asks whether to override it, add a new one, or leave it.
 - **To-dos** for Mihai, Miguel, Rafael, Micael and Sascha. Add them per shot, or add general ones on the "To-dos by person" board. An admin can change the team.
 
 Try the interface without any setup: run it locally (see below) and open `/?demo`. Demo data stays in your own browser only.
@@ -47,9 +48,21 @@ The Supabase URL and the anon (publishable) key are built into the public site. 
 
 6. Open a new query, paste [`supabase/004_timeline.sql`](supabase/004_timeline.sql) and click **Run**. This adds the Timeline.
 
+7. Open a new query, paste [`supabase/005_tasks.sql`](supabase/005_tasks.sql) and click **Run**. This adds the Tasks tab.
+
 Existing projects only need the numbered files they have not run yet. Every file is safe to run again.
 
 **Upload size:** Supabase limits the size of each uploaded file for the whole project (50 MB on the free plan). To allow bigger movies, raise it under **Storage > Settings** (paid plans allow up to 500 GB per file), then set the same number in the app under **Admin > Upload limit**. The app refuses larger files before uploading and offers to add them as a link instead.
+
+### AI task extraction (optional)
+
+"Convert to task list" sends the text of one daily summary to Claude (`claude-opus-5`) through a Supabase Edge Function, so the Anthropic API key never reaches the browser or this repository. Only approved users can call it, and it only reads data they can already see. Nothing is saved until a person reviews the proposed tasks.
+
+1. Create an API key at [console.anthropic.com](https://console.anthropic.com) (Settings > API Keys). Usage is billed to that account; one call summary costs a few cents.
+2. In Supabase, open **Edge Functions > Secrets** and add `ANTHROPIC_API_KEY` with the key.
+3. Open **Edge Functions > Deploy a new function > Via Editor**. Name it exactly `extract-tasks`, replace the sample code with the contents of [`supabase/functions/extract-tasks/index.ts`](supabase/functions/extract-tasks/index.ts), and click **Deploy**. Keep "Verify JWT" switched on.
+
+With the Supabase CLI you can instead run `supabase functions deploy extract-tasks` from this folder. Without the function, the button explains that AI extraction is not set up; everything else works.
 
 ### 2. Configure authentication
 
@@ -86,7 +99,7 @@ Open `http://localhost:5173/?demo` for the demo. To work against the real projec
 npm run check
 ```
 
-`npm run check` builds the site and runs both test suites: the schema and security rules on PGlite, and an end-to-end browser test with Playwright. Run `npx playwright install chromium` once before the first run.
+`npm run check` builds the site and runs three test suites: the schema and security rules on PGlite, the Edge Function with mocked Supabase and Claude clients, and an end-to-end browser test with Playwright. Run `npx playwright install chromium` once before the first run.
 
 ## Project layout
 
@@ -95,6 +108,8 @@ supabase/schema.sql   tables, row-level security, storage bucket, realtime
 supabase/002_references.sql   sequences + references tables, "references" bucket
 supabase/003_upload_limit.sql upload size setting
 supabase/004_timeline.sql     dates on sequences and shots, milestones and deadlines
+supabase/005_tasks.sql        task due dates, milestone and call links
+supabase/functions/extract-tasks/index.ts   Edge Function: Claude reads a call summary
 src/main.js           boot, sign-in gate, tabs
 src/auth.js           sign in, register, password reset, approval screen
 src/dailies.js        daily summaries: day list and editor
@@ -103,6 +118,8 @@ src/shots.js          shot tracker grid
 src/todos.js          to-do popover and per-person board
 src/references.js     references per sequence: drag & drop upload, viewer
 src/timeline.js       timeline: sequences, shots, milestones, deadlines
+src/tasks.js          tasks per person, convert to milestones
+src/extract.js        "Convert to task list" review dialog
 src/admin.js          users, project settings, team
 src/api/supabase.js   data access (Supabase)
 src/api/demo.js       browser-only stand-in used by ?demo and the tests

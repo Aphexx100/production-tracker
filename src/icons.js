@@ -45,6 +45,7 @@ const P = {
   cube: 'M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5',
   file: 'M6 3h9l4 4v14H6zM14 3v5h5',
   folder: 'M3 6h6l2 2h10v11H3z',
+  checklist: 'M4 6l2 2 3-3M4 13l2 2 3-3M12 7h8M12 14h8M12 19h8',
   calendar: 'M4 6h16v14H4zM4 10h16M8 3v5M16 3v5M8 14h3M13 14h3M8 17h3',
   paperclip: 'M20 11l-8.5 8.5a5 5 0 01-7-7L13 4a3.5 3.5 0 015 5l-8.5 8.5a2 2 0 01-3-3L14 7',
 };

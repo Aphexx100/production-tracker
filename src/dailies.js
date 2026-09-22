@@ -3,6 +3,7 @@ import { icon } from './icons.js';
 import { api, state, profileName } from './state.js';
 import { createEditor } from './editor.js';
 import { resolveHtml, stripImageUrls } from './media.js';
+import { convertDailyToTasks } from './extract.js';
 
 export function mountDailies(root) {
   let entries = [];
@@ -83,7 +84,7 @@ export function mountDailies(root) {
     if (current?.id === row.id) current = entries.find((e) => e.id === row.id);
   }
 
-  async function open(id) {
+  async function open(id, { focusTitle = false } = {}) {
     saveSoon.cancel();
     saveTitle.flush();
     await saveNow();
@@ -102,10 +103,15 @@ export function mountDailies(root) {
     const del = h('button.icon-btn', { type: 'button', title: 'Delete this summary', 'aria-label': 'Delete this summary' }, icon('trash'));
     del.addEventListener('click', () => remove(current));
     const print = h('button.icon-btn', { type: 'button', title: 'Print / save as PDF', 'aria-label': 'Print' }, icon('print'));
+    const toTasks = h('button.btn.small.ai-btn', { type: 'button', title: 'Let Claude find the action items in this summary and turn them into tasks' }, icon('list', 14), 'Convert to task list');
+    toTasks.addEventListener('click', async () => {
+      saveSoon.cancel(); saveTitle.flush(); await saveNow(); await saving;
+      convertDailyToTasks(current, toTasks);
+    });
     print.addEventListener('click', () => window.print());
 
     const head = h('header.day-head',
-      h('div.day-head-row', date, title, h('div.spacer'), h('span.save-status', savedLabel(current)), print, del));
+      h('div.day-head-row', date, title, h('div.spacer'), h('span.save-status', savedLabel(current)), toTasks, print, del));
     const editorBox = h('div.editor-box');
     main.append(head, editorBox);
 
@@ -117,7 +123,8 @@ export function mountDailies(root) {
       onUpdate: () => { dirty = true; setStatus('Editing…'); saveSoon(); },
       onBlur: () => { if (dirty) saveSoon.flush(); },
     });
-    if (!current.content) editor.commands.focus();
+    if (focusTitle) $('.title-input', main)?.focus();
+    else if (!current.content) editor.commands.focus();
   }
 
   function renderEmpty() {
@@ -131,8 +138,7 @@ export function mountDailies(root) {
     try {
       const row = await api().dailies.create({ day: todayISO(), title: '', content: '' });
       mergeEntry(row);
-      await open(row.id);
-      $('.title-input', main)?.focus();
+      await open(row.id, { focusTitle: true });
     } catch (e) { toast(`Could not create: ${errMsg(e)}`, 'error', 6000); }
   }
 
@@ -176,7 +182,7 @@ export function mountDailies(root) {
   window.addEventListener('beforeunload', (e) => { if (dirty) { saveSoon.flush(); e.preventDefault(); } });
 
   // ---------- init ----------
-  (async () => {
+  const ready = (async () => {
     try {
       entries = await api().dailies.list();
     } catch (e) { toast(`Could not load summaries: ${errMsg(e)}`, 'error', 8000); }
@@ -185,6 +191,7 @@ export function mountDailies(root) {
   })();
 
   return {
+    async revealDaily(id) { await ready; if (entries.some((e) => e.id === id)) await open(id); },
     async leave() { saveSoon.cancel(); await saveNow(); },
     enter() { if (current) history.replaceState(null, '', `#dailies/${current.id}`); else history.replaceState(null, '', '#dailies'); },
     destroy() { unsub(); editor?.destroy(); },

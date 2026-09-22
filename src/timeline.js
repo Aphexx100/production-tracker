@@ -1,6 +1,6 @@
 import { h, $, toast, errMsg, modal, confirmDialog, lsGet, lsSet, todayISO, fmtDay } from './util.js';
 import { icon } from './icons.js';
-import { api, emit } from './state.js';
+import { api, emit, on } from './state.js';
 import { isMissingTable } from './sequences.js';
 import { STATUSES } from './statuses.js';
 
@@ -29,6 +29,7 @@ export function mountTimeline(root) {
   let shots = [];
   let seqMeta = [];
   let milestones = [];
+  let todos = [];
   let missing = false;
   let zoom = lsGet('pt-tl-zoom', 'week');
   const expanded = new Set(lsGet('pt-tl-open', []));
@@ -260,13 +261,16 @@ export function mountTimeline(root) {
     return el;
   }
 
+  const tasksOf = (m) => todos.filter((t) => t.milestone_id === m.id);
+
   function msEl(m) {
+    const linked = tasksOf(m);
     const late = !m.done && m.kind === 'deadline' && m.date < todayISO();
     return h(`div.tl-ms.${m.kind}${m.done ? '.done' : ''}${late ? '.overdue' : ''}`, {
       style: { left: `${x(m.date) + dw() / 2}px` }, dataset: { ms: m.id }, tabIndex: 0, role: 'button',
-      title: `${m.kind === 'deadline' ? 'Deadline' : 'Milestone'}: ${m.title}\n${fmtDay(m.date)}${m.done ? ' · done' : late ? ' · overdue' : ''}${m.notes ? `\n${m.notes}` : ''}`,
+      title: `${m.kind === 'deadline' ? 'Deadline' : 'Milestone'}: ${m.title}\n${fmtDay(m.date)}${m.done ? ' · done' : late ? ' · overdue' : ''}${m.notes ? `\n${m.notes}` : ''}${linked.length ? `\n${linked.map((t) => `${t.done ? '✓' : '•'} ${t.person}: ${t.body}`).join('\n')}` : ''}`,
       on: { keydown: (e) => { if (e.key === 'Enter') editMilestone(m); } },
-    }, h('span.tl-ms-ico', m.kind === 'deadline' ? '⚑' : ''), h('span.tl-ms-txt', m.title));
+    }, h('span.tl-ms-ico', m.kind === 'deadline' ? '⚑' : ''), h('span.tl-ms-txt', m.title, linked.length ? h('span.tl-ms-tasks', ` · ${linked.filter((t) => t.done).length}/${linked.length} tasks`) : null));
   }
 
   // ---------- scrolling / zoom ----------
@@ -542,6 +546,8 @@ export function mountTimeline(root) {
     h('label', 'Belongs to', scope),
     h('label', 'Notes', notes),
     h('label.check', done, 'Done / met'),
+    !isNew && tasksOf(m).length ? h('div.ms-tasks', h('strong', 'Linked tasks'), h('ul', tasksOf(m).map((t) => h(`li${t.done ? '.done' : ''}`, `${t.done ? '✓' : '•'} ${t.person}: ${t.body}${t.due_date ? ` (due ${fmtDay(t.due_date, { day: 'numeric', month: 'short' })})` : ''}`))),
+      h('button.link-btn', { type: 'button', on: { click: () => { dlg.close(); emit('navigate', { tab: 'tasks' }); } } }, 'Open Tasks')) : null,
     h('div.row.end',
       !isNew ? h('button.btn.danger', { type: 'button', on: { click: async () => {
         if (!(await confirmDialog(`Delete “${m.title}”?`))) return;
@@ -555,6 +561,7 @@ export function mountTimeline(root) {
 
   // ---------- live updates ----------
   const later = () => { if (!drag) render(); };
+  const offTasks = on('tasks-changed', async () => { todos = await api().todos.list().catch(() => todos); later(); });
   const unsubs = [
     api().subscribe('shots', (type, row, old) => {
       shots = type === 'DELETE' ? shots.filter((s) => s.id !== old.id) : [...shots.filter((s) => s.id !== row.id), row].sort((a, b) => a.sort_order - b.sort_order);
@@ -572,8 +579,8 @@ export function mountTimeline(root) {
 
   async function load() {
     try {
-      const [sh, sq, ms] = await Promise.all([api().shots.list(), api().sequences.list(), api().milestones.list()]);
-      shots = sh; seqMeta = sq; milestones = ms; missing = false;
+      const [sh, sq, ms, td] = await Promise.all([api().shots.list(), api().sequences.list(), api().milestones.list(), api().todos.list().catch(() => [])]);
+      shots = sh; seqMeta = sq; milestones = ms; todos = td; missing = false;
     } catch (e) {
       if (isMissingTable(e)) missing = true;
       else toast(`Could not load the timeline: ${errMsg(e)}`, 'error', 8000);
@@ -597,7 +604,7 @@ export function mountTimeline(root) {
       if (date) scrollToDate(date, true);
       $(`.tl-row[data-key="seq:${CSS.escape(code)}"]`, scroller)?.scrollIntoView({ block: 'nearest' });
     },
-    destroy() { unsubs.forEach((u) => u()); },
+    destroy() { unsubs.forEach((u) => u()); offTasks(); },
   };
 }
 

@@ -1019,7 +1019,10 @@ export function mountShots(root) {
     async enter() {
       history.replaceState(null, '', '#shots');
       // counts may have changed while another tab was open
-      [refRows, seqMeta] = await Promise.all([api().refs.list().catch(() => refRows), api().sequences.list().catch(() => seqMeta)]);
+      [refRows, seqMeta, store.todos] = await Promise.all([
+        api().refs.list().catch(() => refRows), api().sequences.list().catch(() => seqMeta), api().todos.list().catch(() => store.todos),
+      ]);
+      store.changed();
       countRefs(refRows);
       refreshSequences();
       if (view === 'grid' && !editing) renderBody();

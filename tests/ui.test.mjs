@@ -430,6 +430,111 @@ try {
   await page.keyboard.press('Escape');
   ok('shot tracker offers Start / End columns');
 
+  // ---- tasks: call summary -> AI task list -> tasks -> milestones ----
+  await page.click('#tab-dailies');
+  await page.click('#pane-dailies button:has-text("New daily summary")');
+  await page.waitForFunction(() => document.activeElement?.classList.contains('title-input'));
+  await page.fill('.title-input', 'Production meeting');
+  await page.click('.editor-surface .ProseMirror');
+  await page.keyboard.type('Mihai books the fog machine by 2026-10-02 for the SQ010 VFX turnover.');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Rafael: roto SQ010_0020 for the Final grade deadline.');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Weather held all day.');
+  await page.click('#pane-dailies button:has-text("Convert to task list")');
+  await page.waitForSelector('.review-modal table.review tbody tr');
+  const reviewRows = await page.$$eval('.review-modal tbody tr', (trs) => trs.map((tr) => ({
+    person: tr.querySelector('select[aria-label="Person"]').value,
+    body: tr.querySelector('input[aria-label="Task"]').value,
+    due: tr.querySelector('input[aria-label="Due date"]').value,
+    ms: tr.querySelector('input[aria-label="Milestone"]').value,
+    shot: tr.querySelector('select[aria-label="Shot"]').selectedOptions[0].textContent,
+  })));
+  assert.deepEqual(reviewRows.map((r) => [r.person, r.due, r.ms, r.shot]), [
+    ['Mihai', '2026-10-02', 'SQ010 VFX turnover', '—'],
+    ['Rafael', '', 'Final grade', 'SQ010_0020'],
+  ]);
+  assert.match(await page.textContent('.review-modal'), /demo pattern matcher/);
+  ok('“Convert to task list” proposes action items with person, due date, milestone and shot for review');
+
+  await page.fill('.review-modal tbody tr:nth-child(2) input[aria-label="Task"]', 'Roto Mara on SQ010_0020');
+  await page.click('.review-modal button:has-text("Create 2 tasks")');
+  await page.waitForSelector('#pane-tasks:not([hidden]) .task');
+  const col = (name) => page.locator(`.tasks-board .board-col[data-person="${name}"]`);
+  const mihaiTask = col('Mihai').locator('.task', { hasText: 'fog machine' });
+  assert.match(await mihaiTask.textContent(), /2 Oct/);
+  assert.equal(await mihaiTask.locator('.tchip.ms.deadline').textContent(), '⚑ SQ010 VFX turnover');
+  assert.equal(await mihaiTask.locator('.tchip.src').count(), 1);
+  const rafTask = col('Rafael').locator('.task', { hasText: 'Roto Mara' });
+  assert.equal(await rafTask.locator('.tchip.ms.pending').textContent(), '◇ Final grade');
+  assert.equal(await rafTask.locator('.tchip.shot').textContent(), 'SQ010_0020');
+  ok('tasks land in the per-person lists, linked to the existing milestone, the shot and the call');
+
+  // running it again on the same call flags duplicates
+  await page.click('#tab-dailies');
+  await page.click('#pane-dailies button:has-text("Convert to task list")');
+  await page.waitForSelector('.review-modal tr.dup');
+  assert.equal(await page.locator('.review-modal tr.dup').count(), 2);
+  assert.ok(await page.locator('.review-modal button:has-text("Create 0 tasks")').isDisabled());
+  await page.click('.review-modal button:has-text("Cancel")');
+  ok('re-running on the same call marks already created tasks');
+
+  await page.click('#tab-tasks');
+  await page.click('button:has-text("Convert to milestones")');
+  await page.waitForSelector('.review-modal .conflict-note');
+  const groupRows = page.locator('.review-modal tbody tr');
+  assert.equal(await groupRows.count(), 2);
+  const conflictRow = page.locator('.review-modal tr.conflict');
+  assert.match(await conflictRow.textContent(), /SQ010 VFX turnover/);
+  await page.click('.review-modal button:has-text("Apply")');
+  assert.match(await page.textContent('.review-modal .form-msg'), /Choose what to do for “SQ010 VFX turnover”/);
+  await conflictRow.locator('select').selectOption('update');
+  await page.click('.review-modal button:has-text("Apply")');
+  assert.match(await page.textContent('.review-modal .form-msg'), /needs a date/);
+  await page.locator('.review-modal tr:not(.conflict) input[type=date]').fill('2026-10-20');
+  await page.click('.review-modal button:has-text("Apply")');
+  await page.waitForSelector('.toast:has-text("1 created, 1 overridden, 0 left alone")');
+  let db = await page.evaluate(() => JSON.parse(localStorage.getItem('pt-demo-db-v1')));
+  const vfx = db.milestones.find((m) => m.title === 'SQ010 VFX turnover');
+  const grade = db.milestones.find((m) => m.title === 'Final grade');
+  const rotoShot = db.shots.find((s) => s.shot_name === 'SQ010_0020');
+  assert.equal(vfx.date, '2026-10-02', 'override takes the task due date');
+  assert.deepEqual([grade.date, grade.kind, grade.shot_id], ['2026-10-20', 'deadline', rotoShot.id]);
+  assert.equal(db.todos.find((t) => t.body === 'Roto Mara on SQ010_0020').milestone_id, grade.id);
+  assert.equal(await rafTask.locator('.tchip.ms.deadline').textContent(), '⚑ Final grade');
+  ok('“Convert to milestones” asks about existing ones, overrides or creates, and links the tasks');
+
+  await page.click('button:has-text("Convert to milestones")');
+  await page.waitForSelector('.review-modal .conflict-note');
+  assert.equal(await page.locator('.review-modal tr.conflict').count(), 2, 'both are now already listed');
+  await page.click('.review-modal button:has-text("Do nothing for all")');
+  await page.click('.review-modal button:has-text("Apply")');
+  await page.waitForSelector('.toast:has-text("0 created, 0 overridden, 2 left alone")');
+  db = await page.evaluate(() => JSON.parse(localStorage.getItem('pt-demo-db-v1')));
+  assert.equal(db.milestones.filter((m) => m.title === 'Final grade').length, 1);
+  ok('already listed milestones: “do nothing” leaves the timeline unchanged');
+
+  await page.click('#tab-timeline');
+  await page.waitForSelector('.tl-ms:has-text("Final grade")');
+  assert.match(await page.textContent('.tl-ms:has-text("Final grade")'), /0\/1 tasks/);
+  await page.locator('.tl-ms:has-text("Final grade")').click();
+  assert.match(await page.textContent('.modal .ms-tasks'), /Rafael: Roto Mara/);
+  await page.keyboard.press('Escape');
+  ok('timeline milestones show their linked tasks');
+
+  await page.click('#tab-tasks');
+  await mihaiTask.locator('.tchip.src').click();
+  await page.waitForFunction(() => document.querySelector('#pane-dailies:not([hidden]) .title-input')?.value === 'Production meeting');
+  ok('a task links back to the call it came from');
+
+  await page.click('#tab-tasks');
+  await col('Sascha').locator('.todo-add').fill('Send call sheet');
+  await col('Sascha').locator('.todo-add').press('Enter');
+  const sendTask = col('Sascha').locator('.task', { hasText: 'Send call sheet' });
+  await sendTask.locator('input[type=checkbox]').click();
+  await page.waitForFunction(() => !document.querySelector('.tasks-board .board-col[data-person="Sascha"]').textContent.includes('Send call sheet'));
+  ok('add a task by hand and complete it');
+
   // security: stored markup must not run script
   await page.evaluate(() => {
     const db = JSON.parse(localStorage.getItem('pt-demo-db-v1'));

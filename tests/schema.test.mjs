@@ -36,11 +36,13 @@ const sql = readFileSync(new URL('../supabase/schema.sql', import.meta.url), 'ut
 const refsSql = readFileSync(new URL('../supabase/002_references.sql', import.meta.url), 'utf8');
 const limitSql = readFileSync(new URL('../supabase/003_upload_limit.sql', import.meta.url), 'utf8');
 const timelineSql = readFileSync(new URL('../supabase/004_timeline.sql', import.meta.url), 'utf8');
+const tasksSql = readFileSync(new URL('../supabase/005_tasks.sql', import.meta.url), 'utf8');
 for (let i = 0; i < 2; i++) { // twice: every file must be safe to re-run
   await db.exec(sql);
   await db.exec(refsSql);
   await db.exec(limitSql);
   await db.exec(timelineSql);
+  await db.exec(tasksSql);
 }
 
 const ADMIN = '00000000-0000-0000-0000-00000000000a';
@@ -185,5 +187,20 @@ ok('timeline: date ranges validated, milestones/deadlines scoped to project, seq
 await as(MEMBER, `delete from public.shots where id = '${tlShot}'`);
 r = await db.query(`select count(*)::int n from public.milestones where title = 'Turnover'`); assert.equal(r.rows[0].n, 0);
 ok('deleting a shot removes its milestones');
+
+// tasks
+await as(MEMBER, `insert into public.dailies (title) values ('Call for tasks')`);
+const dId = (await db.query(`select id from public.dailies where title = 'Call for tasks'`)).rows[0].id;
+const msId = (await db.query(`select id from public.milestones where title = 'Picture lock'`)).rows[0].id;
+await as(MEMBER, `insert into public.todos (person, body, due_date, milestone_id, milestone_title, daily_id, source_quote)
+  values ('Mihai', 'Deliver cut', '2026-11-20', '${msId}', 'Picture lock', '${dId}', 'Mihai delivers the cut')`);
+await fails(MEMBER, `insert into public.todos (person, body, milestone_title) values ('Mihai', 'x', '${'m'.repeat(201)}')`);
+r = await as(PENDING, 'select * from public.todos'); assert.equal(r.rows.length, 0);
+await as(MEMBER, `delete from public.milestones where id = '${msId}'`);
+r = await db.query(`select milestone_id, milestone_title from public.todos where body = 'Deliver cut'`);
+assert.deepEqual(r.rows[0], { milestone_id: null, milestone_title: 'Picture lock' });
+await as(MEMBER, `delete from public.dailies where id = '${dId}'`);
+r = await db.query(`select daily_id from public.todos where body = 'Deliver cut'`); assert.equal(r.rows[0].daily_id, null);
+ok('tasks: due date, milestone link and source call; deleting either keeps the task');
 
 console.log(`schema: ${passed} checks passed`);

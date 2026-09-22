@@ -117,7 +117,9 @@ label.check { display: inline-flex; align-items: center; gap: 6px; color: var(--
   font-size: 11px; font-weight: 700; letter-spacing: 0.05em; color: var(--accent-ink);
   background: var(--accent); padding: 2px 7px; border-radius: 4px;
 }
-.tabs { display: flex; gap: 2px; height: 100%; margin-left: 16px; }
+.tabs { display: flex; gap: 2px; height: 100%; margin-left: 16px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: none; }
 .tab {
   display: inline-flex; align-items: center; gap: 7px; padding: 0 14px; height: 100%;
   border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-2); cursor: pointer; font-weight: 500;
@@ -609,6 +611,53 @@ textarea.cell-input { height: auto; min-height: 110px; resize: vertical; box-sha
 .form-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .form-row > label { flex: 1 1 140px; }
 input[type='color'] { padding: 2px; width: 60px; min-height: 32px; }
+
+/* ---------- tasks ---------- */
+.tasks { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.tasks-toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.tasks-toolbar .search-wrap { width: 240px; }
+.tasks-summary { font-size: 12.5px; }
+.tasks-board { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.task-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.task {
+  display: flex; align-items: flex-start; gap: 8px; padding: 8px 6px 8px 8px; border-radius: 7px;
+  background: var(--bg-2); border: 1px solid var(--line);
+}
+.task:hover { border-color: var(--line-2); }
+.task .icon-btn { visibility: hidden; flex: none; }
+.task:hover .icon-btn, .task .icon-btn:focus-visible { visibility: visible; }
+.task-main { flex: 1; min-width: 0; display: grid; gap: 5px; }
+.task-body { overflow-wrap: anywhere; }
+.task.done .task-body { color: var(--text-3); text-decoration: line-through; }
+.task-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.tchip {
+  display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--line-2); background: var(--panel); color: var(--text-2); white-space: nowrap; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; font-family: inherit;
+}
+button.tchip { cursor: pointer; }
+button.tchip:hover { border-color: var(--accent); color: var(--text); }
+.tchip.due.late { border-color: var(--danger); color: var(--danger); font-weight: 600; }
+.tchip.ms.deadline { color: #ffb4b4; }
+.tchip.ms.milestone { color: var(--accent); }
+.tchip.ms.pending { border-style: dashed; color: var(--text-3); }
+.tchip.shot { font-family: var(--mono); color: var(--accent); }
+.ai-btn .ico { color: var(--accent); }
+.review-modal { width: min(1200px, 100%) !important; }
+.review-wrap { overflow: auto; max-height: 60vh; border: 1px solid var(--line); border-radius: 8px; }
+table.review th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+table.review td { vertical-align: top; }
+table.review input:not([type='checkbox']), table.review select { width: 100%; min-width: 90px; }
+table.review .task-cell { min-width: 280px; }
+table.review .quote { font-size: 11.5px; color: var(--text-3); margin-top: 3px; font-style: italic; }
+table.review tr.dup td { opacity: 0.6; }
+table.review tr.invalid td { background: rgba(240, 99, 99, 0.1); }
+table.review tr.conflict td:first-child { box-shadow: inset 3px 0 0 var(--st-hld); }
+.conflict-note { border: 1px solid var(--st-hld); background: rgba(240, 132, 60, 0.1); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; }
+.tl-ms-tasks { color: var(--text-3); font-weight: 400; }
+.ms-tasks { display: grid; gap: 4px; font-size: 13px; }
+.ms-tasks ul { margin: 0; padding-left: 1em; list-style: none; display: grid; gap: 2px; color: var(--text-2); }
+.ms-tasks li.done { color: var(--text-3); text-decoration: line-through; }
 
 /* ---------- small screens ---------- */
 @media (max-width: 760px) {

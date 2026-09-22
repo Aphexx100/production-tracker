@@ -65,6 +65,28 @@ function dataUrlToBlob(url) {
   return new Blob([bytes], { type: head.slice(5).split(';')[0] });
 }
 
+function demoExtract(daily, db) {
+  const doc = new DOMParser().parseFromString(daily.content || '', 'text/html').body;
+  doc.querySelectorAll('p,li,h1,h2,h3,br').forEach((n) => n.append('\n'));
+  const lines = doc.textContent.split(/\n|(?<=[.!?])\s+/).map((l) => l.trim()).filter(Boolean);
+  const team = db.team.map((t) => t.name);
+  const shots = db.shots.map((s) => s.shot_name).filter(Boolean);
+  const ms = db.milestones.map((m) => m.title);
+  const out = [];
+  for (const line of lines) {
+    const person = team.find((n) => new RegExp(`\\b${n}\\b`, 'i').test(line)) || null;
+    if (!person && !/^(todo|action|ap)\b[:\s]/i.test(line)) continue;
+    const iso = line.match(/\b(\d{4}-\d{2}-\d{2})\b/)?.[1] || null;
+    const milestone = ms.find((t) => line.toLowerCase().includes(t.toLowerCase()))
+      || line.match(/\bfor (?:the )?([A-Z][\w ]{2,40}?) (?:milestone|deadline)\b/)?.[1] || null;
+    out.push({
+      person, body: line.replace(/^(todo|action|ap)\b[:\s]*/i, '').slice(0, 300), due_date: iso,
+      shot_name: shots.find((s) => line.includes(s)) || null, milestone_title: milestone, source_quote: line.slice(0, 200),
+    });
+  }
+  return out;
+}
+
 export function createDemoApi() {
   let db = lsGet(KEY, null) || seed();
   db.sequences ||= [];
@@ -117,7 +139,7 @@ export function createDemoApi() {
   function defaults(name) {
     if (name === 'shots') return { sort_order: 0, status: 'wtg', priority: 'normal', sequence: '', scene: '', shot_name: '', description: '', shot_type: '', lens: '', camera: '', movement: '', frame_in: null, frame_out: null, handles: 0, location: '', int_ext: '', day_night: '', shoot_day: null, assignee: null, due_date: null, comments: '', start_date: null, end_date: null };
     if (name === 'dailies') return { title: '', content: '' };
-    if (name === 'todos') return { done: false, shot_id: null };
+    if (name === 'todos') return { done: false, shot_id: null, due_date: null, milestone_id: null, milestone_title: null, daily_id: null, source_quote: null };
     if (name === 'milestones') return { kind: 'milestone', sequence: '', shot_id: null, notes: '', done: false };
     if (name === 'refs') return { sequence: '', title: '', notes: '', url: null, storage_path: null, thumb_path: null, file_name: null, mime: null, size_bytes: null };
     return {};
@@ -187,6 +209,15 @@ export function createDemoApi() {
       remove: async (code) => { db.sequences = db.sequences.filter((x) => x.code !== code); save(); },
     },
     milestones: table('milestones', (a, b) => a.date.localeCompare(b.date)),
+    // Demo only: a simple pattern matcher stands in for Claude, so the flow can be tried offline.
+    ai: {
+      async extractTasks(dailyId) {
+        await wait();
+        const d = db.dailies.find((x) => x.id === dailyId);
+        if (!d) throw new Error('Daily summary not found.');
+        return { tasks: demoExtract(d, db), model: 'demo pattern matcher (not Claude)' };
+      },
+    },
     refs: table('refs', (a, b) => a.created_at.localeCompare(b.created_at)),
     // Small files persist in localStorage; big ones (movies) only live until reload.
     refFiles: {

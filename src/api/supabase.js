@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, FunctionsHttpError } from '@supabase/supabase-js';
 
 const BUCKET = 'media';
 const REF_BUCKET = 'references';
@@ -127,6 +127,22 @@ export function createSupabaseApi(url, anonKey) {
 
     refs: table('refs', [['created_at', true]]),
     milestones: table('milestones', [['date', true]]),
+
+    ai: {
+      /** Ask the extract-tasks Edge Function (Claude) for task proposals from a daily summary. */
+      async extractTasks(dailyId) {
+        const { data, error } = await sb.functions.invoke('extract-tasks', { body: { daily_id: dailyId } });
+        if (!error) return data;
+        if (error instanceof FunctionsHttpError) {
+          const status = error.context?.status;
+          let msg = '';
+          try { msg = (await error.context.json()).error || ''; } catch { /* not JSON */ }
+          if (status === 404 && !msg) throw new Error('AI extraction is not set up yet: an admin must deploy the "extract-tasks" Edge Function (see README).');
+          throw new Error(msg || `AI extraction failed (${status})`);
+        }
+        throw new Error(`Could not reach the AI extraction service: ${error.message}`);
+      },
+    },
 
     refFiles: {
       /**
