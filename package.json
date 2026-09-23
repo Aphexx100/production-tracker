@@ -6,8 +6,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node tests/schema.test.mjs && node tests/edge.test.mjs && node tests/ui.test.mjs",
-    "check": "npm run build && npm test"
+    "test": "node tests/schema.test.mjs && node tests/edge.test.mjs && node tests/backup.test.mjs && node tests/ui.test.mjs",
+    "check": "npm run build && npm test",
+    "backup": "node scripts/backup.mjs",
+    "restore": "node scripts/restore.mjs"
   },
   "license": "UNLICENSED",
   "type": "module",

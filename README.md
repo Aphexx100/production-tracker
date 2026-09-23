@@ -23,6 +23,7 @@ Try the interface without any setup: run it locally (see below) and open `/?demo
 | Totals | Shot count, total length in frames and timecode at the project frame rate, status breakdown |
 | Data | CSV export of the current view, CSV import that matches column headers |
 | Team | Live updates: changes from other people appear without a reload |
+| Backups | Nightly export of every table to a private repository, a manual JSON download in Admin, and a restore script |
 
 ## Security model
 
@@ -99,6 +100,42 @@ In **Authentication**:
 
 In the Admin window you can also set the project name and frame rate, and add or remove team members for the to-do lists.
 
+## Backups
+
+Supabase's free plan has **no automatic backups**, so this repository runs its own.
+
+**Daily, automatic:** the GitHub Actions workflow *Daily backup* runs at 03:15 UTC, exports every table to JSON and commits it to a **private** backup repository. It keeps one backup per day for 30 days, then the first of each month for a year. Uploaded files stay in Supabase storage; the backup records their paths and sizes.
+
+Set it up once:
+
+1. In Supabase, open **Project Settings > API Keys** and copy the **service_role** (secret) key. It bypasses row-level security, so it goes nowhere near the app.
+2. In this repository, open **Settings > Secrets and variables > Actions**:
+   - **Secrets > New repository secret**: `SUPABASE_SERVICE_ROLE_KEY` = that key.
+   - **Secrets > New repository secret**: `BACKUP_TOKEN` = a GitHub fine-grained token with **Contents: Read and write** on the private backup repository only.
+   - **Variables**: `BACKUP_REPO` = `owner/name` of that private repository (already set to `Aphexx100/production-tracker-backups`).
+3. Open **Actions > Daily backup > Run workflow** once to check it.
+
+Without `BACKUP_REPO`/`BACKUP_TOKEN` the workflow still runs and keeps each backup as a workflow artifact for 90 days. Without the service key it does nothing and says so.
+
+**By hand, from the app:** *Admin > Backup > Download backup (JSON)* saves everything the signed-in user can see as one file.
+
+**By hand, on your machine:**
+
+```bash
+SUPABASE_URL=https://xxxx.supabase.co SUPABASE_SERVICE_ROLE_KEY=... npm run backup -- --out backups --files
+```
+
+`--files` also downloads the reference files and pasted images.
+
+**Restore** writes the rows back by primary key (existing rows are overwritten, newer rows are kept, nothing is deleted):
+
+```bash
+npm run restore -- --dir backups/2026-09-23           # dry run, shows what it would write
+npm run restore -- --dir backups/2026-09-23 --yes     # actually restore
+```
+
+Login accounts live in Supabase Auth, not in these files, so `profiles` and `admin_emails` are skipped unless you pass `--with-profiles`.
+
 ## Local development
 
 ```bash
@@ -139,4 +176,6 @@ src/extract.js        "Convert to task list" review dialog
 src/admin.js          users, project settings, team
 src/api/supabase.js   data access (Supabase)
 src/api/demo.js       browser-only stand-in used by ?demo and the tests
+scripts/backup.mjs    nightly/manual export of all tables to JSON
+scripts/restore.mjs   write a backup back into the database
 ```

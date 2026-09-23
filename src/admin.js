@@ -1,5 +1,6 @@
-import { h, modal, toast, errMsg, fmtTime, confirmDialog } from './util.js';
+import { h, modal, toast, errMsg, fmtTime, confirmDialog, todayISO, download } from './util.js';
 import { api, state, emit, isAdmin } from './state.js';
+import { icon } from './icons.js';
 import { passwordProblem } from './auth.js';
 
 export function openAccount() {
@@ -61,6 +62,9 @@ export async function openAdmin() {
         ? 'Upload limit: files larger than this are refused before uploading. Keep it equal to Supabase › Storage › Settings (50 MB on the free plan).'
         : 'Upload limit setting: run supabase/003_upload_limit.sql in the Supabase SQL Editor to enable it. Until then the app uses 50 MB.')),
     h('section', h('h3', 'Team (to-do lists)'), teamBox),
+    h('section', h('h3', 'Backup'),
+      h('p.faint', 'A nightly backup of the whole project runs on GitHub (see the README). Use this button for an extra copy right now: it downloads everything you can see as one JSON file. Uploaded files stay in Supabase storage.'),
+      h('div.row', h('button.btn', { type: 'button', on: { click: (e) => downloadBackup(e.currentTarget) } }, icon('download', 15), 'Download backup (JSON)'))),
   ], { wide: true });
 
   async function renderUsers() {
@@ -111,4 +115,41 @@ export async function openAdmin() {
 
   renderUsers();
   renderTeam();
+}
+
+/** Manual backup from the browser, with the signed-in user's own access. */
+async function downloadBackup(button) {
+  const label = button.innerHTML;
+  button.disabled = true;
+  button.textContent = 'Collecting…';
+  const empty = () => [];
+  try {
+    const [settings, team, profiles, sequences, shots, dailies, milestones, todos, refs] = await Promise.all([
+      api().settings.get().catch(() => null),
+      api().team.list().catch(empty),
+      api().profiles.list().catch(empty),
+      api().sequences.list().catch(empty),
+      api().shots.list().catch(empty),
+      api().dailies.list().catch(empty),
+      api().milestones.list().catch(empty),
+      api().todos.list().catch(empty),
+      api().refs.list().catch(empty),
+    ]);
+    const data = {
+      exported_at: new Date().toISOString(),
+      exported_by: state.me?.email || '',
+      project: settings?.project_name || '',
+      note: 'Files in storage are not included; their rows list the paths.',
+      tables: { project_settings: settings ? [settings] : [], team_members: team, profiles, sequences, shots, dailies, milestones, todos, refs },
+    };
+    const name = (data.project || 'production').replace(/[^\w-]+/g, '_');
+    download(`${name}_backup_${todayISO()}.json`, JSON.stringify(data, null, 2), 'application/json');
+    const rows = Object.values(data.tables).reduce((a, t) => a + t.length, 0);
+    toast(`Backup downloaded: ${rows} rows`);
+  } catch (e) {
+    toast(`Backup failed: ${errMsg(e)}`, 'error', 8000);
+  } finally {
+    button.disabled = false;
+    button.innerHTML = label;
+  }
 }

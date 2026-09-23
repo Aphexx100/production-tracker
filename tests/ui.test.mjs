@@ -4,6 +4,7 @@ import { preview } from 'vite';
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { readFile } from 'node:fs/promises';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const server = await preview({ root, preview: { port: 5199, strictPort: true }, logLevel: 'silent' });
@@ -714,6 +715,22 @@ try {
   await page.keyboard.press('Escape');
   await page.uncheck('#pane-shots label.check:has-text("Group by sequence") input');
   ok('group headers open the sequence editor');
+
+  // manual backup from Admin
+  await page.click('.app-head button[aria-label="Admin"]');
+  await page.waitForSelector('.modal-body table.simple');
+  const [dl] = await Promise.all([
+    page.waitForEvent('download'),
+    page.click('.modal button:has-text("Download backup")'),
+  ]);
+  assert.match(dl.suggestedFilename(), /^Demo_Production_backup_\d{4}-\d{2}-\d{2}\.json$/);
+  const saved = await dl.path();
+  const backup = JSON.parse(await readFile(saved, 'utf8'));
+  assert.ok(backup.tables.shots.length && backup.tables.dailies.length && backup.tables.todos.length);
+  assert.ok(backup.tables.dailies.some((d) => d.transcript === null || typeof d.transcript === 'string'));
+  assert.equal(backup.project, 'Demo Production');
+  await page.keyboard.press('Escape');
+  ok('Admin downloads a full JSON backup of everything the user can see');
 
   // security: stored markup must not run script
   await page.evaluate(() => {

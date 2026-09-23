@@ -1,0 +1,85 @@
+name: Daily backup
+
+on:
+  schedule:
+    - cron: '15 3 * * *' # 03:15 UTC every day
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Check configuration
+        id: cfg
+        env:
+          URL: ${{ vars.SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          REPO: ${{ vars.BACKUP_REPO }}
+          TOKEN: ${{ secrets.BACKUP_TOKEN }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "::warning::Backups are not set up: add the repository variable SUPABASE_URL and the secret SUPABASE_SERVICE_ROLE_KEY (see README)."
+            echo "ready=no" >> "$GITHUB_OUTPUT"
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then exit 1; fi
+            exit 0
+          fi
+          echo "ready=yes" >> "$GITHUB_OUTPUT"
+          if [ -n "$REPO" ] && [ -n "$TOKEN" ]; then
+            echo "target=repo" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No private backup repository configured (variable BACKUP_REPO + secret BACKUP_TOKEN); keeping the backup as a workflow artifact for 90 days instead."
+            echo "target=artifact" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out the private backup repository
+        if: steps.cfg.outputs.target == 'repo'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.BACKUP_REPO }}
+          token: ${{ secrets.BACKUP_TOKEN }}
+          path: backup-repo
+
+      - name: Export the database
+        if: steps.cfg.outputs.ready == 'yes'
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          OUT=${{ steps.cfg.outputs.target == 'repo' && 'backup-repo/backups' || 'backups' }}
+          node scripts/backup.mjs --out "$OUT"
+
+      - name: Commit to the private backup repository
+        if: steps.cfg.outputs.target == 'repo'
+        working-directory: backup-repo
+        run: |
+          git config user.name "Production Tracker backup"
+          git config user.email "noreply@github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing changed since the last backup."
+          else
+            git commit -m "Backup $(date -u +%Y-%m-%d)"
+            git push
+          fi
+
+      - name: Keep the backup as an artifact
+        if: steps.cfg.outputs.target == 'artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-${{ github.run_id }}
+          path: backups
+          retention-days: 90
