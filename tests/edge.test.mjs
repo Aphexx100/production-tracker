@@ -29,9 +29,9 @@ ok('model output is checked against real team, shot and milestone names');
 
 // ---- handler with mocks
 const DAILY = '11111111-1111-1111-1111-111111111111';
-function fakeSupabase({ approved = true, content = '<p>Mihai books the fog machine for Friday for VFX turnover.</p>' } = {}) {
+function fakeSupabase({ approved = true, content = '<p>Mihai books the fog machine for Friday for VFX turnover.</p>', transcript = null } = {}) {
   const tables = {
-    dailies: { data: { id: DAILY, day: '2026-09-21', title: 'Harbour day 3', content } },
+    dailies: { data: { id: DAILY, day: '2026-09-21', title: 'Harbour day 3', content, transcript } },
     team_members: { data: [{ name: 'Mihai' }, { name: 'Sascha' }] },
     shots: { data: [{ shot_name: 'SQ010_0010' }] },
     milestones: { data: [{ title: 'VFX turnover', date: '2026-10-06', kind: 'deadline' }] },
@@ -94,5 +94,36 @@ assert.match((await res.json()).error, /API key was rejected/);
 res = await fn.handle(new Request('https://x', { method: 'OPTIONS' }), { env: env(), supabase: fakeSupabase, anthropic: fakeClaude(good) });
 assert.equal(res.headers.get('Access-Control-Allow-Origin'), '*');
 ok('too-long notes, refusal, truncation, bad API key and CORS preflight handled');
+
+// summary action
+const draft = {
+  stop_reason: 'end_turn', model: 'claude-opus-5', usage: { input_tokens: 4000, output_tokens: 300 },
+  parsed_output: { title: 'Harbour day 3 — fog delays', sections: [
+    { heading: 'Shot today', bullets: ['  Pier dolly shots all circled  ', ''] },
+    { heading: '', bullets: ['dropped: no heading'] },
+    { heading: 'Problems and delays', bullets: ['Fog machine arrived 40 minutes late\u0007'] },
+  ] },
+};
+res = await fn.handle(req({ daily_id: DAILY, action: 'summary' }), {
+  env: env(), supabase: () => fakeSupabase({ transcript: 'Sascha: the fog machine was late.\nMihai: we still circled the pier dolly shots.' }), anthropic: fakeClaude(draft),
+});
+assert.equal(res.status, 200);
+body = await res.json();
+assert.deepEqual(body.summary.sections, [
+  { heading: 'Shot today', bullets: ['Pier dolly shots all circled'] },
+  { heading: 'Problems and delays', bullets: ['Fog machine arrived 40 minutes late'] },
+]);
+assert.equal(body.summary.title, 'Harbour day 3 — fog delays');
+assert.match(lastRequest.system, /You write the notes of a film production's daily call/);
+assert.match(lastRequest.messages[0].content, /<transcript>\nSascha: the fog machine was late\./);
+assert.equal(lastRequest.output_config.format.schema.properties.sections.items.required.join(','), 'heading,bullets');
+ok('summary action drafts sections from the transcript and cleans them');
+
+res = await fn.handle(req({ daily_id: DAILY, action: 'summary' }), {
+  env: env(), supabase: () => fakeSupabase({ content: '' }), anthropic: () => { throw new Error('must not call Claude'); },
+});
+assert.equal(res.status, 400);
+assert.match((await res.json()).error, /nothing to summarise/);
+ok('summary without a transcript or notes is refused before calling Claude');
 
 console.log(`edge: ${passed} checks passed`);

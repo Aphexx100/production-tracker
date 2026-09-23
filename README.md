@@ -2,7 +2,7 @@
 
 A small web app for tracking a film production: daily call summaries and a shot list.
 
-- **Daily summaries**: a rich text editor for the notes from each daily call. You can paste screenshots straight in. A list on the left shows every day; click a day to open its summary. The editor saves automatically.
+- **Daily summaries**: a rich text editor for the notes from each daily call, with an AI row to upload the call transcript, draft the summary from it, and turn it into tasks. You can paste screenshots straight in. A list on the left shows every day; click a day to open its summary. The editor saves automatically.
 - **Shot tracker**: a spreadsheet-style grid with shot name, description (with images), lens, comments and per-person to-dos. It also has Shotgrid-style extras: status pipeline, frame in/out with length and timecode, handles, sequence and scene, shot size, camera and movement, location, INT/EXT, day/night, shoot day, assignee, priority and due date.
 - **References**: one container per sequence (the same codes as the "Seq" column), with files sorted into Movies, Pictures, PDFs, Links, Audio, Documents, 3D & scenes and Other. Drag files or links from your desktop or browser onto a sequence to upload them. Movies and pictures get thumbnails and open in a viewer; PDFs open in a new tab. The paperclip next to each Seq in the shot tracker jumps to its references, and "Shots" on a sequence filters the shot tracker to it.
 - **Timeline**: a Gantt chart with one row per sequence that opens into its shots. Drag bars to move them, drag their ends to change dates, or drag across an empty row to plan it. Milestones (◆) and deadlines (⚑) can belong to the whole project, a sequence or a single shot; overdue deadlines turn red and the next ones show at the top. Shoot days and shot due dates appear as markers. Zoom by days, weeks or months.
@@ -55,19 +55,27 @@ The Supabase URL and the anon (publishable) key are built into the public site. 
 
 9. Open a new query, paste [`supabase/007_sequence_admin.sql`](supabase/007_sequence_admin.sql) and click **Run**. This lets you rename and delete sequences.
 
+10. Open a new query, paste [`supabase/008_transcripts.sql`](supabase/008_transcripts.sql) and click **Run**. This lets a day carry the call transcript.
+
 Existing projects only need the numbered files they have not run yet. Every file is safe to run again.
 
 **Upload size:** Supabase limits the size of each uploaded file for the whole project (50 MB on the free plan). To allow bigger movies, raise it under **Storage > Settings** (paid plans allow up to 500 GB per file), then set the same number in the app under **Admin > Upload limit**. The app refuses larger files before uploading and offers to add them as a link instead.
 
-### AI task extraction (optional)
+### AI helpers for daily summaries (optional)
 
-"Convert to task list" sends the text of one daily summary to Claude (`claude-opus-5`) through a Supabase Edge Function, so the Anthropic API key never reaches the browser or this repository. Only approved users can call it, and it only reads data they can already see. Nothing is saved until a person reviews the proposed tasks.
+The **AI** row on a daily summary has three buttons:
+
+- **Upload transcript** attaches the call transcript (.txt, .md, .vtt, .srt, .json). Subtitle timestamps are stripped in the browser; the text is stored with the day.
+- **Summarise with AI** drafts the written summary from the transcript (or from rough notes), shown for review before it is kept.
+- **Convert to task list** finds the action items in the summary and the transcript.
+
+Both send the text of that one day to Claude (`claude-opus-5`) through a Supabase Edge Function, so the Anthropic API key never reaches the browser or this repository. Only approved users can call it, and it only reads data they can already see. Nothing is saved until a person reviews the result.
 
 1. Create an API key at [console.anthropic.com](https://console.anthropic.com) (Settings > API Keys). Usage is billed to that account; one call summary costs a few cents.
 2. In Supabase, open **Edge Functions > Secrets** and add `ANTHROPIC_API_KEY` with the key.
 3. Open **Edge Functions > Deploy a new function > Via Editor**. Name it exactly `extract-tasks`, replace the sample code with the contents of [`supabase/functions/extract-tasks/index.ts`](supabase/functions/extract-tasks/index.ts), and click **Deploy**. Keep "Verify JWT" switched on.
 
-With the Supabase CLI you can instead run `supabase functions deploy extract-tasks` from this folder. Without the function, the button explains that AI extraction is not set up; everything else works.
+Redeploy the same way whenever that file changes. With the Supabase CLI you can instead run `supabase functions deploy extract-tasks` from this folder. Without the function, the button explains that AI extraction is not set up; everything else works.
 
 ### 2. Configure authentication
 
@@ -116,6 +124,7 @@ supabase/004_timeline.sql     dates on sequences and shots, milestones and deadl
 supabase/005_tasks.sql        task due dates, milestone and call links
 supabase/006_task_priority.sql task priority
 supabase/007_sequence_admin.sql rename / delete sequences everywhere at once
+supabase/008_transcripts.sql  call transcripts for the AI buttons
 supabase/functions/extract-tasks/index.ts   Edge Function: Claude reads a call summary
 src/main.js           boot, sign-in gate, tabs
 src/auth.js           sign in, register, password reset, approval screen

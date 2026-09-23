@@ -133,9 +133,9 @@ export function createSupabaseApi(url, anonKey) {
     milestones: table('milestones', [['date', true]]),
 
     ai: {
-      /** Ask the extract-tasks Edge Function (Claude) for task proposals from a daily summary. */
-      async extractTasks(dailyId) {
-        const { data, error } = await sb.functions.invoke('extract-tasks', { body: { daily_id: dailyId } });
+      /** Ask the extract-tasks Edge Function (Claude); action 'tasks' or 'summary'. */
+      async call(action, dailyId) {
+        const { data, error } = await sb.functions.invoke('extract-tasks', { body: { daily_id: dailyId, action } });
         if (!error) return data;
         if (error instanceof FunctionsHttpError) {
           const status = error.context?.status;
@@ -144,8 +144,10 @@ export function createSupabaseApi(url, anonKey) {
           if (status === 404 && !msg) throw new Error('AI extraction is not set up yet: an admin must deploy the "extract-tasks" Edge Function (see README).');
           throw new Error(msg || `AI extraction failed (${status})`);
         }
-        throw new Error(`Could not reach the AI extraction service: ${error.message}`);
+        throw new Error(`Could not reach the AI service: ${error.message}`);
       },
+      extractTasks(dailyId) { return this.call('tasks', dailyId); },
+      summariseDaily(dailyId) { return this.call('summary', dailyId); },
     },
 
     refFiles: {

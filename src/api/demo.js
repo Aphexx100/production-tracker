@@ -68,7 +68,8 @@ function dataUrlToBlob(url) {
 function demoExtract(daily, db) {
   const doc = new DOMParser().parseFromString(daily.content || '', 'text/html').body;
   doc.querySelectorAll('p,li,h1,h2,h3,br').forEach((n) => n.append('\n'));
-  const lines = doc.textContent.split(/\n|(?<=[.!?])\s+/).map((l) => l.trim()).filter(Boolean);
+  // keep "Name:" prefixes here: the demo matcher uses them to guess the person
+  const lines = `${doc.textContent}\n${daily.transcript || ''}`.split(/\n|(?<=[.!?])\s+/).map((l) => l.trim()).filter(Boolean);
   const team = db.team.map((t) => t.name);
   const shots = db.shots.map((s) => s.shot_name).filter(Boolean);
   const ms = db.milestones.map((m) => m.title);
@@ -85,6 +86,30 @@ function demoExtract(daily, db) {
     });
   }
   return out;
+}
+
+// Demo only: buckets sentences by keyword instead of asking Claude.
+function demoSummary(daily) {
+  const doc = new DOMParser().parseFromString(daily.content || '', 'text/html').body;
+  doc.querySelectorAll('p,li,h1,h2,h3,br').forEach((n) => n.append('\n'));
+  const raw = `${daily.transcript || ''}\n${doc.textContent}`;
+  const lines = raw.split(/\n|(?<=[.!?])\s+/).map((l) => l.replace(/^[^:]{1,40}:\s*/, '').trim()).filter((l) => l.length > 3);
+  const buckets = [
+    { heading: 'Shot today', test: /shot|take|circled|filmed|camera|lens/i },
+    { heading: 'Decisions', test: /decide|agreed|we will|approved|go with/i },
+    { heading: 'Problems and delays', test: /late|delay|lost|broken|problem|issue|wait/i },
+    { heading: 'Weather and locations', test: /weather|rain|fog|sun|wind|location|harbour|set/i },
+    { heading: 'Next steps', test: /tomorrow|next|book|prepare|send|plan/i },
+  ];
+  const seen = new Set();
+  const sections = [];
+  for (const b of buckets) {
+    const bullets = lines.filter((l) => b.test.test(l) && !seen.has(l)).slice(0, 6);
+    bullets.forEach((l) => seen.add(l));
+    if (bullets.length) sections.push({ heading: b.heading, bullets });
+  }
+  if (!sections.length && lines.length) sections.push({ heading: 'Notes', bullets: lines.slice(0, 8) });
+  return { title: daily.title || `Call of ${daily.day}`, sections };
 }
 
 export function createDemoApi() {
@@ -138,7 +163,7 @@ export function createDemoApi() {
 
   function defaults(name) {
     if (name === 'shots') return { sort_order: 0, status: 'wtg', priority: 'normal', sequence: '', scene: '', shot_name: '', description: '', shot_type: '', lens: '', camera: '', movement: '', frame_in: null, frame_out: null, handles: 0, location: '', int_ext: '', day_night: '', shoot_day: null, assignee: null, due_date: null, comments: '', start_date: null, end_date: null };
-    if (name === 'dailies') return { title: '', content: '' };
+    if (name === 'dailies') return { title: '', content: '', transcript: null, transcript_name: null };
     if (name === 'todos') return { done: false, priority: 'normal', shot_id: null, due_date: null, milestone_id: null, milestone_title: null, daily_id: null, source_quote: null };
     if (name === 'milestones') return { kind: 'milestone', sequence: '', shot_id: null, notes: '', done: false };
     if (name === 'refs') return { sequence: '', title: '', notes: '', url: null, storage_path: null, thumb_path: null, file_name: null, mime: null, size_bytes: null };
@@ -231,6 +256,12 @@ export function createDemoApi() {
         const d = db.dailies.find((x) => x.id === dailyId);
         if (!d) throw new Error('Daily summary not found.');
         return { tasks: demoExtract(d, db), model: 'demo pattern matcher (not Claude)' };
+      },
+      async summariseDaily(dailyId) {
+        await wait();
+        const d = db.dailies.find((x) => x.id === dailyId);
+        if (!d) throw new Error('Daily summary not found.');
+        return { summary: demoSummary(d), model: 'demo pattern matcher (not Claude)' };
       },
     },
     refs: table('refs', (a, b) => a.created_at.localeCompare(b.created_at)),

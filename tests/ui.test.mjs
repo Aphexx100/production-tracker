@@ -430,6 +430,50 @@ try {
   await page.keyboard.press('Escape');
   ok('shot tracker offers Start / End columns');
 
+  // ---- transcript upload + AI summary ----
+  await page.click('#tab-dailies');
+  await page.click('#pane-dailies button:has-text("New daily summary")');
+  await page.waitForFunction(() => document.activeElement?.classList.contains('title-input'));
+  const vtt = ['WEBVTT', '', '1', '00:00:01.000 --> 00:00:04.000', '<v Sascha>Weather held all day, we shot the pier dolly.',
+    '', '2', '00:00:04.500 --> 00:00:08.000', 'Mihai: the fog machine arrived 40 minutes late, we lost time.',
+    '', '3', '00:00:08.500 --> 00:00:12.000', 'Mihai: the fog machine arrived 40 minutes late, we lost time.',
+    '', '4', '00:00:12.500 --> 00:00:16.000', 'Sascha: tomorrow we book the crane for SQ020_0010.'].join('\n');
+  await page.setInputFiles('#pane-dailies input[type=file][accept*=".vtt"]', { name: 'call-2026-09-23.vtt', mimeType: 'text/vtt', buffer: Buffer.from(vtt) });
+  await page.waitForSelector('.transcript-chip .chip-main');
+  assert.match(await page.textContent('.transcript-chip'), /call-2026-09-23\.vtt · \d+ words/);
+  await page.click('.transcript-chip .chip-main');
+  const shownTranscript = await page.textContent('.transcript-view');
+  assert.doesNotMatch(shownTranscript, /WEBVTT|-->|^\d+$/m, 'timestamps and cue numbers are stripped');
+  assert.match(shownTranscript, /Sascha: Weather held all day/);
+  assert.equal(shownTranscript.match(/fog machine arrived/g).length, 1, 'repeated cues collapse');
+  await page.keyboard.press('Escape');
+  ok('upload a transcript: subtitles are cleaned, stored with the day and shown on request');
+
+  await page.click('#pane-dailies button:has-text("Summarise with AI")');
+  await page.waitForSelector('.summary-preview h2');
+  const headings = await page.$$eval('.summary-preview h2', (els) => els.map((e) => e.textContent));
+  assert.ok(headings.length >= 2, headings.join('|'));
+  await page.click('.modal button:has-text("Keep this summary")');
+  await page.waitForFunction(() => document.querySelector('.editor-surface .ProseMirror h2'));
+  const written = await page.textContent('.editor-surface .ProseMirror');
+  assert.match(written, /fog machine arrived 40 minutes late/);
+  const suggested = await page.inputValue('.title-input');
+  assert.ok(suggested.length > 3, `suggested title: ${suggested}`);
+  await page.waitForFunction((t) => JSON.parse(localStorage.getItem('pt-demo-db-v1')).dailies.some((d) => d.title === t), suggested);
+  await page.waitForFunction(() => /Saved/.test(document.querySelector('.save-status')?.textContent));
+  ok('“Summarise with AI” drafts the summary, previews it and writes it into the day');
+
+  await page.click('#pane-dailies button:has-text("Convert to task list")');
+  await page.waitForSelector('.review-modal tbody tr');
+  assert.match(await page.textContent('.review-modal tbody'), /crane for SQ020_0010/);
+  await page.click('.review-modal button:has-text("Cancel")');
+  ok('task extraction also reads the transcript');
+
+  await page.click('.transcript-chip .icon-btn');
+  await page.click('.modal button.danger');
+  await page.waitForFunction(() => !document.querySelector('.transcript-chip .chip-main'));
+  ok('a transcript can be removed again');
+
   // ---- tasks: call summary -> AI task list -> tasks -> milestones ----
   await page.click('#tab-dailies');
   await page.click('#pane-dailies button:has-text("New daily summary")');

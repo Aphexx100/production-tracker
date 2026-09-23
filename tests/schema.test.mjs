@@ -39,6 +39,7 @@ const timelineSql = readFileSync(new URL('../supabase/004_timeline.sql', import.
 const tasksSql = readFileSync(new URL('../supabase/005_tasks.sql', import.meta.url), 'utf8');
 const prioSql = readFileSync(new URL('../supabase/006_task_priority.sql', import.meta.url), 'utf8');
 const seqAdminSql = readFileSync(new URL('../supabase/007_sequence_admin.sql', import.meta.url), 'utf8');
+const transcriptSql = readFileSync(new URL('../supabase/008_transcripts.sql', import.meta.url), 'utf8');
 for (let i = 0; i < 2; i++) { // twice: every file must be safe to re-run
   await db.exec(sql);
   await db.exec(refsSql);
@@ -47,6 +48,7 @@ for (let i = 0; i < 2; i++) { // twice: every file must be safe to re-run
   await db.exec(tasksSql);
   await db.exec(prioSql);
   await db.exec(seqAdminSql);
+  await db.exec(transcriptSql);
 }
 
 const ADMIN = '00000000-0000-0000-0000-00000000000a';
@@ -242,5 +244,13 @@ assert.equal(await cnt(`select count(*)::int n from public.shots where shot_name
 await fails(MEMBER, `select public.delete_sequence('SQ020', 'SQ020')`);
 await fails(PENDING, `select public.delete_sequence('SQ020', '')`);
 ok('delete a sequence: its shots, references and milestones move, nothing is lost');
+
+// transcripts
+await as(MEMBER, `insert into public.dailies (title, transcript, transcript_name) values ('With transcript', 'Sascha: we start at six.', 'call.vtt')`);
+r = await as(MEMBER, `select transcript_name from public.dailies where title = 'With transcript'`);
+assert.equal(r.rows[0].transcript_name, 'call.vtt');
+await fails(MEMBER, `update public.dailies set transcript = repeat('x', 400001) where title = 'With transcript'`);
+r = await as(PENDING, `select * from public.dailies where title = 'With transcript'`); assert.equal(r.rows.length, 0);
+ok('daily summaries can carry a transcript, size-capped and behind the same access rules');
 
 console.log(`schema: ${passed} checks passed`);

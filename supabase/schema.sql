@@ -354,5 +354,6 @@ $$;
 -- this file, in order: 002_references.sql (References tab),
 -- 003_upload_limit.sql (upload size setting), 004_timeline.sql (Timeline tab),
 -- 005_tasks.sql (Tasks tab), 006_task_priority.sql (task priority),
--- 007_sequence_admin.sql (rename / delete sequences).
+-- 007_sequence_admin.sql (rename / delete sequences),
+-- 008_transcripts.sql (call transcripts + AI summary).
 -- ---------------------------------------------------------------------

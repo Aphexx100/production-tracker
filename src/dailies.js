@@ -1,9 +1,12 @@
-import { h, $, debounce, toast, errMsg, todayISO, fmtDay, fmtTime, htmlToText, confirmDialog } from './util.js';
+import { h, $, debounce, toast, errMsg, todayISO, fmtDay, fmtTime, htmlToText, confirmDialog, modal, LOCALE } from './util.js';
 import { icon } from './icons.js';
 import { api, state, profileName } from './state.js';
 import { createEditor } from './editor.js';
 import { resolveHtml, stripImageUrls } from './media.js';
 import { convertDailyToTasks } from './extract.js';
+import { TRANSCRIPT_ACCEPT, readTranscriptFile, wordCount, summaryToHtml } from './transcript.js';
+import { sanitize } from './sanitize.js';
+import { isMissingTable } from './sequences.js';
 
 export function mountDailies(root) {
   let entries = [];
@@ -103,15 +106,26 @@ export function mountDailies(root) {
     const del = h('button.icon-btn', { type: 'button', title: 'Delete this summary', 'aria-label': 'Delete this summary' }, icon('trash'));
     del.addEventListener('click', () => remove(current));
     const print = h('button.icon-btn', { type: 'button', title: 'Print / save as PDF', 'aria-label': 'Print' }, icon('print'));
-    const toTasks = h('button.btn.small.ai-btn', { type: 'button', title: 'Let Claude find the action items in this summary and turn them into tasks' }, icon('list', 14), 'Convert to task list');
+    const toTasks = h('button.btn.small', { type: 'button', title: 'Let Claude find the action items in this call and turn them into tasks' }, icon('checklist', 14), 'Convert to task list');
     toTasks.addEventListener('click', async () => {
-      saveSoon.cancel(); saveTitle.flush(); await saveNow(); await saving;
+      await flushAll();
       convertDailyToTasks(current, toTasks);
     });
+
+    const fileInput = h('input', { type: 'file', accept: TRANSCRIPT_ACCEPT, hidden: true, 'aria-hidden': 'true' });
+    fileInput.addEventListener('change', () => { uploadTranscript(fileInput.files[0]); fileInput.value = ''; });
+    const uploadBtn = h('button.btn.small', { type: 'button', title: 'Attach the transcript of the call (.txt, .vtt, .srt, .json). It is kept with the day and used by the AI buttons.' },
+      icon('upload', 14), 'Upload transcript');
+    uploadBtn.addEventListener('click', () => fileInput.click());
+    const summariseBtn = h('button.btn.small.ai-btn', { type: 'button', title: 'Let Claude draft the summary from the transcript' }, icon('sparkle', 14), 'Summarise with AI');
+    summariseBtn.addEventListener('click', () => summarise(summariseBtn));
+    const transcriptChip = h('span.transcript-chip');
+    const aiBox = h('div.ai-group', h('span.ai-lbl', 'AI'), uploadBtn, summariseBtn, toTasks, transcriptChip, fileInput);
     print.addEventListener('click', () => window.print());
 
     const head = h('header.day-head',
-      h('div.day-head-row', date, title, h('div.spacer'), h('span.save-status', savedLabel(current)), toTasks, print, del));
+      h('div.day-head-row', date, title, h('div.spacer'), h('span.save-status', savedLabel(current)), print, del),
+      aiBox);
     const editorBox = h('div.editor-box');
     main.append(head, editorBox);
 
@@ -123,6 +137,7 @@ export function mountDailies(root) {
       onUpdate: () => { dirty = true; setStatus('Editing…'); saveSoon(); },
       onBlur: () => { if (dirty) saveSoon.flush(); },
     });
+    renderTranscript();
     if (focusTitle) $('.title-input', main)?.focus();
     else if (!current.content) editor.commands.focus();
   }
@@ -155,6 +170,115 @@ export function mountDailies(root) {
 
   newBtn.addEventListener('click', createNew);
   search.addEventListener('input', () => { query = search.value; renderList(); });
+
+
+  // ---------- AI helpers (transcript + summary) ----------
+  async function flushAll() {
+    saveSoon.cancel(); saveTitle.flush();
+    await saveNow(); await saving;
+  }
+
+  function renderTranscript() {
+    const chip = $('.transcript-chip', main);
+    const btn = $('.ai-btn', main);
+    if (!chip) return;
+    const has = !!current?.transcript;
+    if (btn) {
+      btn.disabled = !has && !htmlToText(current?.content || '');
+      btn.title = has ? 'Let Claude draft the summary from the transcript' : 'Upload a transcript first, or write rough notes — then Claude turns them into a summary';
+    }
+    if (!has) { chip.replaceChildren(); return; }
+    const words = wordCount(current.transcript);
+    chip.replaceChildren(
+      h('button.chip-main', { type: 'button', title: 'Show the transcript', on: { click: showTranscript } },
+        icon('doc', 12), current.transcript_name || 'transcript', h('span.faint', ` · ${words.toLocaleString(LOCALE)} words`)),
+      h('button.icon-btn.small', { type: 'button', title: 'Remove the transcript', 'aria-label': 'Remove the transcript', on: { click: removeTranscript } }, icon('x', 12)));
+  }
+
+  function showTranscript() {
+    modal(current.transcript_name || 'Transcript',
+      h('pre.transcript-view', current.transcript), { wide: true });
+  }
+
+  async function uploadTranscript(file) {
+    if (!file || !current) return;
+    let parsed;
+    try { parsed = await readTranscriptFile(file); }
+    catch (e) { toast(errMsg(e), 'error', 8000); return; }
+    if (current.transcript && !(await confirmDialog(`Replace the transcript “${current.transcript_name || ''}” with “${parsed.name}”?`, 'Replace'))) return;
+    await saveTranscript(parsed.text, parsed.name, `Transcript attached: ${parsed.name} (${wordCount(parsed.text).toLocaleString(LOCALE)} words)`);
+  }
+
+  async function removeTranscript() {
+    if (!(await confirmDialog('Remove the transcript from this day? The written summary stays.', 'Remove'))) return;
+    await saveTranscript(null, null, 'Transcript removed');
+  }
+
+  async function saveTranscript(text, name, okMsg) {
+    const id = current.id;
+    try {
+      const row = await api().dailies.update(id, { transcript: text, transcript_name: name });
+      mergeEntry(row);
+      if (current?.id === id) { current.transcript = row.transcript; current.transcript_name = row.transcript_name; renderTranscript(); }
+      toast(okMsg);
+    } catch (e) {
+      toast(isMissingTable(e)
+        ? 'Transcripts need supabase/008_transcripts.sql. An admin must run it once in the Supabase SQL Editor.'
+        : `Not saved: ${errMsg(e)}`, 'error', 9000);
+    }
+  }
+
+  async function summarise(button) {
+    if (!current) return;
+    const label = button.innerHTML;
+    button.disabled = true; button.textContent = 'Reading the call…';
+    let result;
+    try {
+      await flushAll();
+      result = await api().ai.summariseDaily(current.id);
+    } catch (e) {
+      toast(errMsg(e), 'error', 10000);
+      return;
+    } finally { button.disabled = false; button.innerHTML = label; }
+    const summary = result.summary;
+    if (!summary?.sections?.length) { toast('Claude found nothing to summarise in this call.', 'error', 6000); return; }
+    previewSummary(summary, result.model);
+  }
+
+  function previewSummary(summary, model) {
+    const html = summaryToHtml(summary);
+    const preview = h('div.prose.summary-preview');
+    preview.innerHTML = sanitize(html);
+    const hasText = !!htmlToText(current.content || '');
+    const mode = h('select', { 'aria-label': 'Where to put it' },
+      h('option', { value: 'replace' }, hasText ? 'Replace the current summary' : 'Use as the summary'),
+      h('option', { value: 'append' }, 'Add below what is there'));
+    const useTitle = h('input', { type: 'checkbox', checked: !current.title, 'aria-label': 'Use the suggested title' });
+    const dlg = modal('Summary draft', [
+      h('p.faint', `Drafted by ${model || 'Claude'} from ${current.transcript_name ? `“${current.transcript_name}”` : 'your notes'}. Check it before keeping it — you can edit everything afterwards.`),
+      summary.title ? h('label.check.title-suggest', useTitle, `Title: “${summary.title}”`) : null,
+      h('div.review-wrap', preview),
+      h('div.row.end', mode, h('button.btn', { type: 'button', on: { click: () => dlg.close() } }, 'Cancel'),
+        h('button.btn.primary', { type: 'button', on: { click: () => apply() } }, 'Keep this summary')),
+    ], { wide: true });
+    dlg.el.classList.add('review-modal');
+
+    async function apply() {
+      dlg.close();
+      if (mode.value === 'replace') editor.commands.setContent(html, { emitUpdate: false });
+      else editor.commands.insertContentAt(editor.state.doc.content.size, html);
+      dirty = true;
+      setStatus('Editing…');
+      await saveNow();
+      if (summary.title && useTitle.checked) {
+        current.title = summary.title;
+        const input = $('.title-input', main);
+        if (input) input.value = summary.title;
+        await saveMeta(current.id, { title: summary.title });
+      }
+      toast('Summary added — edit it as you like');
+    }
+  }
 
   // ---------- live updates from teammates ----------
   const unsub = api().subscribe('dailies', (type, row, old) => {

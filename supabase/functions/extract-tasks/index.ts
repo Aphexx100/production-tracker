@@ -1,6 +1,8 @@
-// Supabase Edge Function: extract action items from a daily call summary
-// with Claude and return them as task proposals. Nothing is written to the
-// database here — the app shows the proposals for review first.
+// Supabase Edge Function: the AI helpers for a daily call summary.
+//   action "tasks"   -> action items from the summary and transcript
+//   action "summary" -> a written summary drafted from the transcript
+// Nothing is written to the database here — the app shows the result for
+// review first, and the person decides what to keep.
 //
 // Deploy: Supabase dashboard > Edge Functions > Deploy a new function >
 // Via Editor, name it "extract-tasks", paste this file, Deploy.
@@ -28,6 +30,14 @@ const TaskSchema = z.object({
 });
 const ResultSchema = z.object({ tasks: z.array(TaskSchema) });
 
+const SummarySchema = z.object({
+  title: z.string(),
+  sections: z.array(z.object({
+    heading: z.string(),
+    bullets: z.array(z.string()),
+  })),
+});
+
 const SYSTEM = `You turn the notes of a film production's daily call into a task list.
 
 Always write in English. If the notes are in another language, translate the task text and any new milestone title into English.
@@ -44,6 +54,17 @@ For each task:
 
 Return an empty list when there are no action items. Do not invent tasks.`;
 
+const SUMMARY_SYSTEM = `You write the notes of a film production's daily call, from a transcript or rough notes.
+
+Always write in English, and translate if the source is in another language. Write for someone who missed the call and needs the facts fast.
+
+Rules:
+- title: a short name for the day, e.g. "Harbour day 3 — fog delays".
+- sections: 3 to 6 sections with a heading and short bullets. Use only headings that the material supports, in this order where they apply: "Shot today", "Decisions", "Problems and delays", "Weather and locations", "Cast and crew", "Next steps".
+- Each bullet is one fact in one sentence: who, what, and any number, time or date that was said. Keep names, shot names and equipment exactly as spoken.
+- Do not invent anything, do not repeat the same fact in two sections, and leave out small talk.
+- Do not list action items here; they are collected separately.`;
+
 export function htmlToText(html: string): string {
   return String(html || "")
     .replace(/<img[^>]*>/gi, " [image] ")
@@ -55,15 +76,27 @@ export function htmlToText(html: string): string {
     .split("\n").map((line) => line.trim()).filter(Boolean).join("\n");
 }
 
-export function buildPrompt(daily: { day: string; title: string }, notes: string, team: string[], shots: string[], milestones: { title: string; date: string; kind: string }[]): string {
+export function buildPrompt(daily: { day: string; title: string }, notes: string, team: string[], shots: string[], milestones: { title: string; date: string; kind: string }[], transcript = ""): string {
   const list = (items: string[]) => (items.length ? items.map((x) => `- ${x}`).join("\n") : "(none)");
   return [
     `Call date: ${daily.day}${daily.title ? ` — ${daily.title}` : ""}`,
     `Team:\n${list(team)}`,
     `Shots:\n${list(shots)}`,
     `Existing milestones and deadlines:\n${list(milestones.map((m) => `${m.title} (${m.kind}, ${m.date})`))}`,
-    `<notes>\n${notes}\n</notes>`,
-  ].join("\n\n");
+    notes ? `<notes>\n${notes}\n</notes>` : "",
+    transcript ? `<transcript>\n${transcript}\n</transcript>` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+/** Keep the drafted summary to plain, safe text; the app turns it into HTML. */
+export function cleanSummary(out: { title: string; sections: { heading: string; bullets: string[] }[] }) {
+  const clean = (x: string, max: number) => String(x || "").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, max);
+  return {
+    title: clean(out.title, 200),
+    sections: (out.sections || [])
+      .map((sec) => ({ heading: clean(sec.heading, 120), bullets: (sec.bullets || []).map((b) => clean(b, 600)).filter(Boolean) }))
+      .filter((sec) => sec.heading && sec.bullets.length),
+  };
 }
 
 /** Keep only values that exist in the project; never trust the model blindly. */
@@ -113,7 +146,12 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   if (!apiKey) return json({ error: "The ANTHROPIC_API_KEY secret is not set for this Edge Function." }, 500);
 
   let dailyId = "";
-  try { dailyId = String((await req.json()).daily_id || ""); } catch { /* handled below */ }
+  let action = "tasks";
+  try {
+    const payload = await req.json();
+    dailyId = String(payload.daily_id || "");
+    action = payload.action === "summary" ? "summary" : "tasks";
+  } catch { /* handled below */ }
   if (!/^[0-9a-f-]{36}$/i.test(dailyId)) return json({ error: "daily_id is missing" }, 400);
 
   const sb = deps.supabase(deps.env("SUPABASE_URL")!, deps.env("SUPABASE_ANON_KEY")!, auth);
@@ -121,7 +159,7 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   if (approvalError || approved !== true) return json({ error: "Your account is not approved for this project." }, 403);
 
   const [daily, team, shots, milestones] = await Promise.all([
-    sb.from("dailies").select("id, day, title, content").eq("id", dailyId).maybeSingle(),
+    sb.from("dailies").select("id, day, title, content, transcript").eq("id", dailyId).maybeSingle(),
     sb.from("team_members").select("name").order("sort_order"),
     sb.from("shots").select("shot_name").order("sort_order"),
     sb.from("milestones").select("title, date, kind").order("date"),
@@ -132,9 +170,14 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
   const msList: { title: string; date: string; kind: string }[] = milestones.error ? [] : milestones.data || [];
 
   const notes = htmlToText(daily.data.content);
-  if (!notes) return json({ tasks: [], model: MODEL });
-  if (notes.length > MAX_NOTE_CHARS) {
-    return json({ error: `This summary is too long for one extraction (${notes.length} characters, limit ${MAX_NOTE_CHARS}). Split it into several days.` }, 413);
+  const transcript = String(daily.data.transcript || "").trim();
+  if (!notes && !transcript) {
+    return action === "summary"
+      ? json({ error: "There is nothing to summarise yet: upload a transcript or write some notes first." }, 400)
+      : json({ tasks: [], model: MODEL });
+  }
+  if (notes.length + transcript.length > MAX_NOTE_CHARS) {
+    return json({ error: `This call is too long for one request (${notes.length + transcript.length} characters, limit ${MAX_NOTE_CHARS}). Split it into several days.` }, 413);
   }
 
   const client = deps.anthropic(apiKey);
@@ -142,19 +185,17 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     const response = await client.messages.parse({
       model: MODEL,
       max_tokens: 16000,
-      output_config: { effort: "medium", format: zodOutputFormat(ResultSchema) },
-      system: SYSTEM,
-      messages: [{ role: "user", content: buildPrompt(daily.data, notes, teamNames, shotNames, msList) }],
+      output_config: { effort: "medium", format: zodOutputFormat(action === "summary" ? SummarySchema : ResultSchema) },
+      system: action === "summary" ? SUMMARY_SYSTEM : SYSTEM,
+      messages: [{ role: "user", content: buildPrompt(daily.data, notes, teamNames, shotNames, msList, transcript) }],
     });
-    if (response.stop_reason === "refusal") return json({ error: "Claude declined to process this summary." }, 422);
-    if (response.stop_reason === "max_tokens") return json({ error: "The answer was cut off. Split the summary and try again." }, 422);
+    if (response.stop_reason === "refusal") return json({ error: "Claude declined to process this call." }, 422);
+    if (response.stop_reason === "max_tokens") return json({ error: "The answer was cut off. Split the call and try again." }, 422);
     const parsed = response.parsed_output;
-    if (!parsed) return json({ error: "Claude returned no usable task list. Try again." }, 502);
-    return json({
-      tasks: sanitize(parsed.tasks, teamNames, shotNames, msList),
-      model: response.model,
-      usage: { input_tokens: response.usage.input_tokens, output_tokens: response.usage.output_tokens },
-    });
+    if (!parsed) return json({ error: "Claude returned nothing usable. Try again." }, 502);
+    const usage = { input_tokens: response.usage.input_tokens, output_tokens: response.usage.output_tokens };
+    if (action === "summary") return json({ summary: cleanSummary(parsed), model: response.model, usage });
+    return json({ tasks: sanitize(parsed.tasks, teamNames, shotNames, msList), model: response.model, usage });
   } catch (e) {
     if (e instanceof Anthropic.AuthenticationError) return json({ error: "The Anthropic API key was rejected. Check the ANTHROPIC_API_KEY secret." }, 502);
     if (e instanceof Anthropic.RateLimitError) return json({ error: "Claude is rate-limited right now. Try again in a minute." }, 429);
